@@ -95,6 +95,12 @@ ZIPのまま、または中のJSONファイルを、Cairnの画面にドラッ�
 | `CAIRN_CODEX_DIR` | `~/.codex/sessions` | codex CLIログのルート |
 | `CAIRN_SYNC_INTERVAL` | `60` | CLI同期間隔（秒） |
 
+## セキュリティ
+
+Cairn は会話本文を平文の SQLite DB に保存するローカルアプリです。通常起動は
+`127.0.0.1` に限定し、LAN やインターネットへ公開しないでください。詳細な注意点と
+改善バックログは [SECURITY.md](SECURITY.md) を参照してください。
+
 ## テスト
 
 ```bash

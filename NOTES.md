@@ -83,3 +83,15 @@
   threading.local で1スレッド1接続。
 - MCPブラウザ(Docker内)から動作確認するときは `host.docker.internal` を使い、
   サーバーを一時的に `--host 0.0.0.0` で起動する必要がある（通常は127.0.0.1）。
+
+## セキュリティレビューのメモ
+
+- Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。
+  通常運用では必ず `127.0.0.1` に閉じる。必要なら Host/Origin 検証か bearer token を入れる。
+- `/api/import` はアップロード全体とZIP内JSONをメモリに読むため、巨大ファイル/zip bomb
+  対策として Content-Length、ZIP総展開サイズ、候補ファイルサイズの上限が必要。
+- SQLite DB/WAL/SHM は会話全文を平文で含む。作成時・既存ファイルとも `0600` に寄せる。
+- React 側は `dangerouslySetInnerHTML` を使っておらず、本文表示は JSX のテキストノードなので
+  取り込みデータ由来XSSのリスクは低い。
+- frontend は `npm audit` で既知脆弱性0件を確認済み。backend は `pip check` はOKだが、
+  Python脆弱性監査ツールは未導入。
