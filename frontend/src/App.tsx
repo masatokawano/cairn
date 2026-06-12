@@ -45,6 +45,32 @@ const SOURCES: { key: string; label: string }[] = [
 
 const sourceLabel = (key: string) => SOURCES.find((s) => s.key === key)?.label ?? key
 
+/** fetch wrapper: parses JSON and turns HTTP errors into Error(detail). */
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(url, init)
+  } catch {
+    throw new Error('サーバーに接続できません')
+  }
+  let data: unknown = null
+  try {
+    data = await res.json()
+  } catch {
+    /* non-JSON body (e.g. proxy error page) */
+  }
+  if (!res.ok) {
+    const detail = (data as { detail?: string } | null)?.detail
+    throw new Error(detail ?? `HTTP ${res.status}`)
+  }
+  return data as T
+}
+
+const fmtWarnings = (warnings: string[] | undefined) =>
+  warnings && warnings.length
+    ? ` ⚠ warning ${warnings.length}件: ${warnings.slice(0, 3).join(' / ')}${warnings.length > 3 ? ' …' : ''}`
+    : ''
+
 function fmtDate(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -75,19 +101,17 @@ export default function App() {
   const debounce = useRef<number>(0)
 
   const refreshStats = useCallback(() => {
-    fetch('/api/stats')
-      .then((r) => r.json())
+    api<{ sources: SourceStat[] }>('/api/stats')
       .then((d) => setStats(d.sources))
-      .catch(() => {})
+      .catch((e: Error) => setNotice(e.message))
   }, [])
 
   const loadRecent = useCallback((src: string | null) => {
     const p = new URLSearchParams({ limit: '50' })
     if (src) p.set('source', src)
-    fetch(`/api/conversations?${p}`)
-      .then((r) => r.json())
+    api<{ results: ConvSummary[] }>(`/api/conversations?${p}`)
       .then((d) => setRecent(d.results))
-      .catch(() => {})
+      .catch((e: Error) => setNotice(e.message))
   }, [])
 
   useEffect(() => {
@@ -104,10 +128,9 @@ export default function App() {
       }
       const p = new URLSearchParams({ q })
       if (src) p.set('source', src)
-      fetch(`/api/search?${p}`)
-        .then((r) => r.json())
+      api<{ results: SearchHit[] }>(`/api/search?${p}`)
         .then((d) => setHits(d.results))
-        .catch(() => setNotice('検索に失敗しました'))
+        .catch((e: Error) => setNotice(`検索に失敗しました: ${e.message}`))
     },
     [loadRecent],
   )
@@ -120,10 +143,17 @@ export default function App() {
   }, [query, source, runSearch])
 
   const openConversation = (id: number) => {
-    fetch(`/api/conversations/${id}`)
-      .then((r) => r.json())
+    api<Conversation>(`/api/conversations/${id}`)
       .then(setSelected)
-      .catch(() => setNotice('会話の取得に失敗しました'))
+      .catch((e: Error) => setNotice(`会話の取得に失敗しました: ${e.message}`))
+  }
+
+  type ImportResult = {
+    conversations: number
+    inserted: number
+    updated: number
+    skipped: number
+    warnings?: string[]
   }
 
   const importFiles = async (files: FileList | File[]) => {
@@ -132,17 +162,13 @@ export default function App() {
       const form = new FormData()
       form.append('file', file)
       try {
-        const res = await fetch('/api/import', { method: 'POST', body: form })
-        const d = await res.json()
-        if (!res.ok) {
-          setNotice(`${file.name}: ${d.detail ?? 'インポート失敗'}`)
-        } else {
-          setNotice(
-            `${file.name}: ${d.conversations}件中 追加${d.inserted} / 更新${d.updated} / 変更なし${d.skipped}`,
-          )
-        }
-      } catch {
-        setNotice(`${file.name}: アップロードに失敗しました`)
+        const d = await api<ImportResult>('/api/import', { method: 'POST', body: form })
+        setNotice(
+          `${file.name}: ${d.conversations}件中 追加${d.inserted} / 更新${d.updated} / 変更なし${d.skipped}` +
+            fmtWarnings(d.warnings),
+        )
+      } catch (e) {
+        setNotice(`${file.name}: ${(e as Error).message}`)
       }
     }
     setBusy(false)
@@ -150,14 +176,23 @@ export default function App() {
     runSearch(query, source)
   }
 
+  type SyncResult = {
+    files_imported: number
+    inserted: number
+    updated: number
+    warnings?: string[]
+  }
+
   const syncNow = async () => {
     setBusy(true)
     try {
-      const res = await fetch('/api/sync', { method: 'POST' })
-      const d = await res.json()
-      setNotice(`CLI同期: ${d.files_imported}ファイル更新 (追加${d.inserted} / 更新${d.updated})`)
-    } catch {
-      setNotice('同期に失敗しました')
+      const d = await api<SyncResult>('/api/sync', { method: 'POST' })
+      setNotice(
+        `CLI同期: ${d.files_imported}ファイル更新 (追加${d.inserted} / 更新${d.updated})` +
+          fmtWarnings(d.warnings),
+      )
+    } catch (e) {
+      setNotice(`同期に失敗しました: ${(e as Error).message}`)
     }
     setBusy(false)
     refreshStats()

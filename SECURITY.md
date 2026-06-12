@@ -13,66 +13,74 @@ Cairn は個人の AI 会話ログを扱うローカル完結アプリです。�
 
 ## 優先度の高い改善
 
-### 1. localhost バインドの強制または警告
+### 1. localhost バインドの強制または警告 — ✅ 実装済み
 
 現状の API は認証なしで検索と会話本文取得ができる。README の起動例は
 `127.0.0.1` だが、検証用途などで `--host 0.0.0.0` を使うと LAN 上の他端末から
 会話アーカイブを読める可能性がある。
 
-推奨対応:
+実装内容 (`app/main.py` の `local_only` middleware):
 
-- デフォルト起動を `127.0.0.1` に限定する運用を明記する。
-- `Host` / `Origin` が localhost 以外なら拒否する middleware を追加する。
-- `0.0.0.0` で起動した場合は起動時ログに強い警告を出す。
-- 共有利用が必要になったら bearer token などの認証を先に入れる。
+- `Host` ヘッダのホスト名が `127.0.0.1` / `localhost` / `::1` 以外なら全リクエスト 403。
+  LAN からの直接アクセスも DNS rebinding も Host が一致しないため拒否される。
+- 検証用途で他ホスト名が必要な場合は `CAIRN_ALLOW_HOSTS=host.docker.internal` の
+  ように追加できる。設定時は起動ログに強い警告を出す。
+- 共有利用が必要になったら bearer token などの認証を先に入れる（未実装・将来課題）。
 
-### 2. アップロードサイズと ZIP 展開量の制限
+### 2. アップロードサイズと ZIP 展開量の制限 — ✅ 実装済み
 
 `/api/import` はアップロードファイル全体をメモリに読み、ZIP 内 JSON も全展開して
 から parse する。巨大 JSON や zip bomb でメモリ・CPU を使い切る可能性がある。
 
-推奨対応:
+実装内容:
 
-- `Content-Length` と実読込サイズの上限を設定する。
-- ZIP 内のファイル数、個別 JSON サイズ、総展開サイズを検査してから読む。
-- `conversations.json` / `MyActivity.json` など候補ファイル以外を優先的に無視する。
-- 失敗時は 422/413 で、ユーザーが再エクスポートや分割を判断できるメッセージを返す。
+- `Content-Length` の事前チェック + チャンク読み込みでの実サイズ上限
+  （`CAIRN_MAX_UPLOAD_MB`、デフォルト500MB）→ 413。
+- ZIP エントリ数上限（`CAIRN_MAX_ZIP_ENTRIES`、デフォルト10000）→ 413。
+- ZIP 内 JSON はヘッダの `file_size` を信用せず **境界付き読み込み**
+  （`CAIRN_MAX_JSON_MB`、デフォルト500MB）で展開量を制限（zip bomb 対策）→ 413。
+- `conversations.json` / `MyActivity.json` を優先的に試し、それ以外の巨大 JSON は skip。
+- フォーマット不明は 422、サイズ超過は 413 で、対処方法を含むメッセージを返す。
 
-### 3. DB ファイル権限の固定
+### 3. DB ファイル権限の固定 — ✅ 実装済み
 
 会話本文は SQLite DB と WAL/SHM に平文で保存される。マルチユーザー環境やバックアップ
 経由の漏えいを避けるため、DB ファイルは所有ユーザーだけが読める権限にする。
 
-推奨対応:
+実装内容:
 
-- DB 作成時に `0600` を適用する。
-- 既存の `cairn.db` / `cairn.db-wal` / `cairn.db-shm` の権限を確認し、必要に応じて
-  `chmod 600 backend/data/cairn.db*` を実行する。
-- 暗号化が必要な運用では SQLCipher などを検討する。
+- `db.connect()` で DB 本体と既存の WAL/SHM に `0600` を適用する（ベストエフォート）。
+  SQLite は WAL/SHM を DB 本体と同じ権限で作るため、以後作られる sidecar も `0600` になる。
+- 暗号化が必要な運用では SQLCipher などを検討する（将来課題）。
 
-### 4. mutation API の CSRF / localhost 防御
+### 4. mutation API の CSRF / localhost 防御 — ✅ 実装済み
 
 ブラウザの Same-Origin Policy により別 origin からレスポンス本文は読みにくいが、
 `POST /api/sync` や `POST /api/import` の blind request 自体は送れる。ローカル限定アプリ
 でも、悪意ある Web ページから localhost API を叩かれる可能性を考慮する。
 
-推奨対応:
+実装内容:
 
-- `Origin` / `Referer` / `Host` を検証し、localhost 以外を拒否する。
-- mutation API に CSRF token か API token を要求する。
-- `sync` は長時間 I/O を伴うため、同時実行ロックと rate limit を入れる。
+- GET 以外のメソッドで `Origin` ヘッダが存在し localhost 系でなければ 403
+  （ブラウザは cross-origin POST に必ず Origin を付けるため blind POST を遮断。
+  Origin を送らない curl 等の CLI クライアントは通す）。
+- Host 検証は #1 の middleware が全リクエストに適用。
+- sync / import は共通の ingest ロックで直列化。実行中の `POST /api/sync` は 409 を返す。
+- rate limit は未実装（ローカル専用前提のため将来課題）。
 
-### 5. 依存関係の固定と監査
+### 5. 依存関係の固定と監査 — ✅ 実装済み
 
 frontend は `package-lock.json` があり `npm audit` で既知脆弱性 0 件を確認できた。
 backend は `requirements.txt` が下限指定だけなので、将来の install で異なる
 バージョンが入る。
 
-推奨対応:
+実装内容:
 
-- Python 依存を lockfile で固定する。
-- CI またはローカル確認手順に `npm audit` と Python 側の脆弱性監査を追加する。
-- `requirements.txt` は直接実行用、lockfile は再現可能インストール用として役割を分ける。
+- `backend/requirements.lock`（`pip freeze` 出力）を追加。再現可能インストールは
+  `pip install -r requirements.lock`、開発時の追加は `requirements.txt` を更新して
+  lock を再生成する。
+- 監査手順を下の「推奨確認コマンド」に追加（`uvx pip-audit`）。
+  2026-06-12 時点で backend / frontend とも既知脆弱性 0 件。
 
 ## 現状の良い点
 
@@ -88,6 +96,12 @@ npm audit
 
 cd ../backend
 .venv/bin/python -m pip check
+uvx pip-audit -r requirements.lock --no-deps --disable-pip   # 既知脆弱性監査
+ls -l data/                                                  # cairn.db* が 0600 (-rw-------) であること
 ```
 
-Python 側の既知脆弱性監査は、監査ツールを導入してから追加する。
+## 残課題（将来）
+
+- bearer token 認証（共有利用が必要になった場合の前提条件）
+- mutation API の rate limit
+- SQLCipher 等による DB 暗号化

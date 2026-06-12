@@ -7,6 +7,8 @@ import re
 import sqlite3
 import threading
 
+from . import redact
+
 DB_PATH = os.environ.get(
     "CAIRN_DB", os.path.join(os.path.dirname(__file__), "..", "data", "cairn.db")
 )
@@ -50,6 +52,10 @@ END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
 END;
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+END;
 
 CREATE TABLE IF NOT EXISTS ingest_files (
     path TEXT PRIMARY KEY,
@@ -59,26 +65,71 @@ CREATE TABLE IF NOT EXISTS ingest_files (
 """
 
 
+# Schema versioning via PRAGMA user_version. The base _SCHEMA is idempotent
+# (IF NOT EXISTS everywhere) and always executed; _MIGRATIONS is for future
+# non-idempotent changes: append (version, sql) and bump _SCHEMA_VERSION.
+_SCHEMA_VERSION = 1
+_MIGRATIONS: list[tuple[int, str]] = []
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    for target, sql in _MIGRATIONS:
+        if version < target:
+            with conn:
+                conn.executescript(sql)
+                conn.execute(f"PRAGMA user_version = {target}")
+            version = target
+    if version < _SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+
+
+def _restrict_permissions(db_path: str) -> None:
+    """chmod 0600 on the DB and sidecars. WAL/SHM inherit the DB file's mode
+    when SQLite creates them, so fixing the main file covers future ones."""
+    for suffix in ("", "-wal", "-shm"):
+        path = db_path + suffix
+        try:
+            if os.path.exists(path):
+                os.chmod(path, 0o600)
+        except OSError:
+            pass  # best-effort (e.g. foreign-owned file); not fatal
+
+
 def connect() -> sqlite3.Connection:
     """One connection per thread (uvicorn may run handlers on a threadpool)."""
     conn = getattr(_local, "conn", None)
     if conn is None:
-        os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
+        db_path = os.path.abspath(DB_PATH)
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
+        # Overwrite deleted content with zeros so secrets don't linger in
+        # free pages / WAL after deletes and updates.
+        conn.execute("PRAGMA secure_delete = ON")
         conn.executescript(_SCHEMA)
+        _apply_migrations(conn)
+        _restrict_permissions(db_path)
         _local.conn = conn
     return conn
 
 
 def upsert_conversations(parsed_list) -> dict:
-    """Diff import: insert new, replace changed, skip unchanged conversations."""
+    """Diff import: insert new, replace changed, skip unchanged conversations.
+
+    Secret redaction happens HERE — the single choke point for every ingest
+    path (file upload and CLI sync) — and BEFORE content_hash so the stored
+    hash matches the stored (redacted) text and re-syncs stay stable.
+    """
     conn = connect()
     stats = {"inserted": 0, "updated": 0, "skipped": 0}
     with conn:
         for pc in parsed_list:
+            for m in pc.messages:
+                m.text = redact.redact(m.text)
+            pc.title = redact.redact_title(pc.title)
             new_hash = pc.content_hash()
             row = conn.execute(
                 "SELECT id, content_hash FROM conversations WHERE source=? AND source_id=?",
@@ -130,12 +181,20 @@ def _make_snippet(text: str, q: str, width: int = 80) -> str:
     return ("…" if start > 0 else "") + text[start:end] + ("…" if end < len(text) else "")
 
 
-def search(q: str, source: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
+def search(
+    q: str,
+    source: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[dict]:
     """Search messages; group hits by conversation (best hit per conversation).
 
     Multi-term queries (whitespace-separated) are AND. Queries where every
     term has >=3 chars use FTS5 trigram; otherwise LIKE scan (fine at
-    personal-archive scale).
+    personal-archive scale). after/before filter on the conversation's
+    updated_at (ISO8601 string comparison).
     """
     conn = connect()
     terms = [t for t in q.split() if t]
@@ -143,32 +202,47 @@ def search(q: str, source: str | None = None, limit: int = 50, offset: int = 0) 
         return []
     use_fts = all(len(t) >= 3 for t in terms)
 
-    src_clause = " AND c.source = ? " if source else ""
-    src_param = [source] if source else []
+    src_clause = ""
+    src_param: list[str] = []
+    if source:
+        src_clause += " AND c.source = ? "
+        src_param.append(source)
+    if after:
+        src_clause += " AND c.updated_at >= ? "
+        src_param.append(after)
+    if before:
+        src_clause += " AND c.updated_at <= ? "
+        src_param.append(before)
 
     if use_fts:
         # snippet()/bm25() must live in the plain FTS query; window functions
-        # and extra joins go in the outer query.
+        # and extra joins go in the middle layer; paging happens in SQL
+        # (rn=1 keeps only the best-ranked hit per conversation).
         rows = conn.execute(
             f"""
-            SELECT c.id AS conversation_id, c.source, c.title, c.created_at, c.updated_at, c.meta,
-                   m.id AS message_id, m.role, m.created_at AS msg_created_at,
-                   hits.snip,
-                   COUNT(*) OVER (PARTITION BY c.id) AS hit_count,
-                   hits.rank
-            FROM (
-                SELECT rowid,
-                       snippet(messages_fts, 0, '[[', ']]', '…', 24) AS snip,
-                       bm25(messages_fts) AS rank
-                FROM messages_fts
-                WHERE messages_fts MATCH ?
-            ) AS hits
-            JOIN messages m ON m.id = hits.rowid
-            JOIN conversations c ON c.id = m.conversation_id
-            WHERE 1=1 {src_clause}
-            ORDER BY hits.rank
+            SELECT * FROM (
+                SELECT c.id AS conversation_id, c.source, c.title, c.created_at, c.updated_at, c.meta,
+                       m.id AS message_id, m.role, m.created_at AS msg_created_at,
+                       hits.snip,
+                       COUNT(*) OVER (PARTITION BY c.id) AS hit_count,
+                       ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY hits.rank) AS rn,
+                       hits.rank AS rank
+                FROM (
+                    SELECT rowid,
+                           snippet(messages_fts, 0, '[[', ']]', '…', 24) AS snip,
+                           bm25(messages_fts) AS rank
+                    FROM messages_fts
+                    WHERE messages_fts MATCH ?
+                ) AS hits
+                JOIN messages m ON m.id = hits.rowid
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE 1=1 {src_clause}
+            )
+            WHERE rn = 1
+            ORDER BY rank
+            LIMIT ? OFFSET ?
             """,
-            [_fts_query(q), *src_param],
+            [_fts_query(q), *src_param, limit, offset],
         ).fetchall()
     else:
         like_clauses = " AND ".join(["m.text LIKE ? ESCAPE '\\'"] * len(terms))
@@ -178,24 +252,25 @@ def search(q: str, source: str | None = None, limit: int = 50, offset: int = 0) 
         ]
         rows = conn.execute(
             f"""
-            SELECT c.id AS conversation_id, c.source, c.title, c.created_at, c.updated_at, c.meta,
-                   m.id AS message_id, m.role, m.created_at AS msg_created_at,
-                   m.text AS snip,
-                   COUNT(*) OVER (PARTITION BY c.id) AS hit_count,
-                   0 AS rank
-            FROM messages m
-            JOIN conversations c ON c.id = m.conversation_id
-            WHERE {like_clauses} {src_clause}
-            ORDER BY c.updated_at DESC
+            SELECT * FROM (
+                SELECT c.id AS conversation_id, c.source, c.title, c.created_at, c.updated_at, c.meta,
+                       m.id AS message_id, m.role, m.created_at AS msg_created_at,
+                       m.text AS snip,
+                       COUNT(*) OVER (PARTITION BY c.id) AS hit_count,
+                       ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY m.idx) AS rn
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE {like_clauses} {src_clause}
+            )
+            WHERE rn = 1
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
             """,
-            [*like_params, *src_param],
+            [*like_params, *src_param, limit, offset],
         ).fetchall()
 
-    results, seen = [], set()
+    results = []
     for r in rows:
-        if r["conversation_id"] in seen:
-            continue
-        seen.add(r["conversation_id"])
         snip = r["snip"]
         if not use_fts:
             snip = _make_snippet(snip, terms[0])
@@ -212,7 +287,7 @@ def search(q: str, source: str | None = None, limit: int = 50, offset: int = 0) 
             "message_id": r["message_id"],
             "hit_count": r["hit_count"],
         })
-    return results[offset:offset + limit]
+    return results
 
 
 def get_conversation(conv_id: int) -> dict | None:
@@ -236,10 +311,22 @@ def get_conversation(conv_id: int) -> dict | None:
     }
 
 
-def list_conversations(source: str | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
+def list_conversations(
+    source: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    after: str | None = None,
+) -> list[dict]:
     conn = connect()
-    src_clause = "WHERE source = ?" if source else ""
-    params = ([source] if source else []) + [limit, offset]
+    conds, params = [], []
+    if source:
+        conds.append("source = ?")
+        params.append(source)
+    if after:
+        conds.append("updated_at >= ?")
+        params.append(after)
+    src_clause = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params += [limit, offset]
     rows = conn.execute(
         f"""SELECT c.id, c.source, c.title, c.created_at, c.updated_at, c.meta,
                    (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count

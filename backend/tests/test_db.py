@@ -77,6 +77,20 @@ def test_search_groups_by_conversation(db):
     assert results[0]["hit_count"] == 2
 
 
+def test_search_paging_db_side(db):
+    convs = [
+        make_conv(db, f"c{i}", texts=[("user", f"日本語検索のサンプル {i}")])
+        for i in range(5)
+    ]
+    db.upsert_conversations(convs)
+    page1 = db.search("日本語検索", limit=2, offset=0)
+    page2 = db.search("日本語検索", limit=2, offset=2)
+    page3 = db.search("日本語検索", limit=2, offset=4)
+    assert [len(page1), len(page2), len(page3)] == [2, 2, 1]
+    ids = [r["conversation_id"] for r in page1 + page2 + page3]
+    assert len(set(ids)) == 5  # no duplicates across pages
+
+
 def test_stats_and_listing(db):
     db.upsert_conversations([make_conv(db, "c1"), make_conv(db, "c2")])
     s = db.stats()

@@ -35,8 +35,30 @@ def _iter_jsonl(root: str):
                 yield os.path.join(dirpath, name)
 
 
+# Serializes ingest work: the background sync loop, POST /api/sync and
+# POST /api/import all write to the same SQLite DB.
+ingest_lock = threading.Lock()
+
+
 def scan_once() -> dict:
-    """Scan both CLI log trees; import changed files. Returns stats."""
+    """Scan both CLI log trees; import changed files. Returns stats.
+    Blocks until the ingest lock is free."""
+    with ingest_lock:
+        return _scan()
+
+
+def try_scan_once() -> dict | None:
+    """Like scan_once(), but returns None instead of waiting if another
+    sync/import is already running (used by POST /api/sync → 409)."""
+    if not ingest_lock.acquire(blocking=False):
+        return None
+    try:
+        return _scan()
+    finally:
+        ingest_lock.release()
+
+
+def _scan() -> dict:
     totals = {"files_scanned": 0, "files_imported": 0,
               "inserted": 0, "updated": 0, "skipped": 0, "warnings": []}
     for root, parser in (

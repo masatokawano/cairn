@@ -84,6 +84,49 @@
 - MCPブラウザ(Docker内)から動作確認するときは `host.docker.internal` を使い、
   サーバーを一時的に `--host 0.0.0.0` で起動する必要がある（通常は127.0.0.1）。
 
+## Phase 2a: MCPサーバー + シークレット除去（2026-06-12）
+
+- MCP公式SDK（FastMCP）はSTDIOがデフォルト。`@mcp.tool()` はデコレート後も
+  元関数をそのまま返すので、ツール関数は普通のPython関数としてユニットテストできる。
+- claude CLIへの登録は `-m app.mcp_server` だとcwd依存になるため、**絶対パスの
+  スクリプト起動**にし、mcp_server.py冒頭で `__package__` を見てsys.pathを
+  ブートストラップする方式にした。
+- `claude mcp add cairn -s user -- <python絶対パス> <スクリプト絶対パス>` で登録。
+  ツール名は `mcp__cairn__search_conversations` の形になる。
+- 除去はdb.upsert_conversations（全取り込み経路の単一チョークポイント）で
+  **content_hash計算の前に**適用する。これで「元ログ再パース→取り込み時除去→
+  同一ハッシュ→skip」となり、再同期で平文が復活しない。
+- タイトルは60字で切り詰められるためキーが途中で切れてフルパターンに一致しない。
+  タイトル専用に閾値を短くしたパターン（redact_title）を併用。
+- FTS5の更新整合: `AFTER UPDATE OF text` トリガを追加。migrationでは念のため
+  `INSERT INTO messages_fts(messages_fts) VALUES('rebuild')` も実行。
+- 残留ゼロ化の手順: UPDATE → rebuild → `PRAGMA wal_checkpoint(TRUNCATE)` →
+  `VACUUM` → もう一度checkpoint。これでDB本体・WAL・SHMの生バイトから
+  平文が消えることをgrepで確認済み（secure_delete=ONも常時設定）。
+- pip-auditと同じ理由でuvxの内部venv作成は死ぬ環境がある（SIGABRT）。
+- **実Claudeエクスポートで判明**: クラウド版Claudeの会話にもAPIキーが混入していた
+  （dry-runで11箇所/2会話を検出: codex_cli 1 + claude 1）。除去は全ソース必須。
+- 元のCLIログファイル（~/.claude/projects, ~/.codex/sessions）の平文は対象外
+  （READMEに残存リスクとして明記）。漏えいキーのローテーションが唯一確実な対処。
+
+## セキュリティ強化の実装メモ（2026-06-12）
+
+- Host/Origin検証はmiddlewareで実装。**TestClientのデフォルトHostは `testserver`**
+  なので、`TestClient(app, base_url="http://127.0.0.1")` にしないと全テストが403になる。
+- `TestClient` を `with` なしで使うと startup イベント（バックグラウンド同期スレッド）
+  が走らない。APIテストではこれが好都合。
+- SQLiteのWAL/SHMはDB本体と同じ権限で作られるため、DB本体をchmod 0600すれば
+  以後のsidecarも0600になる。既存sidecarだけ明示的にchmod。
+- zip bombはZipInfo.file_size（ヘッダ申告値）を信用せず、`zf.open().read(limit+1)`
+  の境界付き読み込みで実展開量を制限する。
+- `uvx pip-audit` はデフォルトで内部venvを作ろうとしてこの環境ではSIGABRTで死ぬ。
+  **`--no-deps --disable-pip` を付けると完全固定のlockfileに対してvenvなしで監査できる**。
+- 検索のDB側ページングは `ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY rank)` で
+  会話ごとのベストヒットだけ残して LIMIT/OFFSET。snippet()はFTSサブクエリ内、
+  ウィンドウ関数は中間層、と3層に分ける。
+- 同時実行制御: ingest_lock（threading.Lock）を cli_sync に置き、バックグラウンド同期・
+  /api/sync・/api/import で共有。/api/sync は非ブロッキング取得で実行中なら409。
+
 ## セキュリティレビューのメモ
 
 - Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。
