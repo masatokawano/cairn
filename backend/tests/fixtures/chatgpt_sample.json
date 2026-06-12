@@ -1,0 +1,54 @@
+[
+  {
+    "title": "Python sorting question",
+    "create_time": 1714500000.0,
+    "update_time": 1714500300.0,
+    "conversation_id": "abc-123",
+    "current_node": "node3",
+    "mapping": {
+      "root": {"id": "root", "message": null, "parent": null, "children": ["node1"]},
+      "node1": {
+        "id": "node1",
+        "parent": "root",
+        "children": ["node2"],
+        "message": {
+          "id": "msg1",
+          "author": {"role": "system"},
+          "create_time": 1714500000.0,
+          "content": {"content_type": "text", "parts": [""]}
+        }
+      },
+      "node2": {
+        "id": "node2",
+        "parent": "node1",
+        "children": ["node3"],
+        "message": {
+          "id": "msg2",
+          "author": {"role": "user"},
+          "create_time": 1714500010.0,
+          "content": {"content_type": "text", "parts": ["Pythonでリストを安定ソートするには？"]}
+        }
+      },
+      "node3": {
+        "id": "node3",
+        "parent": "node2",
+        "children": [],
+        "message": {
+          "id": "msg3",
+          "author": {"role": "assistant"},
+          "create_time": 1714500020.0,
+          "content": {"content_type": "text", "parts": ["sorted() と list.sort() はどちらも安定ソート（Timsort）です。"]}
+        }
+      }
+    }
+  },
+  {
+    "title": "Empty conversation",
+    "conversation_id": "empty-1",
+    "current_node": null,
+    "mapping": {
+      "root": {"id": "root", "message": null, "parent": null, "children": []}
+    }
+  },
+  {"not_a_conversation": true}
+]

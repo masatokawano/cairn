@@ -1,0 +1,10 @@
+{"type":"mode","mode":"normal","sessionId":"sess-1"}
+{"type":"file-history-snapshot","messageId":"x","snapshot":{}}
+{"type":"summary","summary":"ビルドエラーの調査","leafUuid":"u9"}
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"swiftcのビルドエラーを直して"},"uuid":"u1","timestamp":"2026-06-10T08:46:31.147Z","cwd":"/Users/masato/workspace/demo","sessionId":"sess-1"}
+{"parentUuid":"u1","isSidechain":false,"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"内部思考","signature":"xx"},{"type":"text","text":"エラーログを確認します。"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]},"uuid":"u2","timestamp":"2026-06-10T08:46:34.584Z","cwd":"/Users/masato/workspace/demo","sessionId":"sess-1"}
+{"parentUuid":"u2","isSidechain":true,"type":"user","message":{"role":"user","content":"サイドチェーンのメッセージ（除外されるべき）"},"uuid":"u3","timestamp":"2026-06-10T08:46:35.000Z","sessionId":"sess-1"}
+{"parentUuid":"u2","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file1 file2"}]},"uuid":"u4","timestamp":"2026-06-10T08:46:36.000Z","sessionId":"sess-1"}
+{"parentUuid":"u4","isSidechain":false,"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"},"uuid":"u5","timestamp":"2026-06-10T08:46:37.000Z","sessionId":"sess-1"}
+{"parentUuid":"u5","isSidechain":false,"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"原因はリンクエラーでした。-framework Cocoa を追加してください。"}]},"uuid":"u6","timestamp":"2026-06-10T08:46:40.000Z","cwd":"/Users/masato/workspace/demo","sessionId":"sess-1"}
+not json line

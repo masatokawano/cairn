@@ -1,0 +1,20 @@
+[
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted 東京の明日の天気を教えて",
+    "time": "2025-10-15T08:30:00.000Z",
+    "products": ["Gemini Apps"]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted What is a cairn?",
+    "time": "2025-10-16T09:00:00.000Z",
+    "subtitles": [{"name": "A cairn is a human-made pile of stones."}],
+    "products": ["Gemini Apps"]
+  },
+  {
+    "header": "Maps",
+    "title": "Searched for ramen",
+    "time": "2025-10-16T10:00:00.000Z"
+  }
+]
