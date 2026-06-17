@@ -30,3 +30,18 @@ cd frontend && npm run build
 - パーサーは実データで調整する前提。フォーマット差異に寛容に（壊れた行はwarningにしてskip）
 - chatgpt / Codex / gemini パーサーはまだ実エクスポートで未検証（NOTES.md参照）
 - 学んだことは NOTES.md に追記する
+
+## 開発ロードマップ
+
+中長期の設計方針、実装順序、受入基準は ROADMAP.md に記載している。
+
+機能追加または設計変更を行う前に、必ず以下を読むこと。
+
+1. ROADMAP.md
+2. NOTES.md
+3. SECURITY.md
+4. README.md
+
+ロードマップ全体を一度に実装してはならない。原則として、明確な受入基準を持つ一つのタスクに限定して作業する。
+
+最初に着手する場合は、ROADMAP.md の「Task 1: 現状監査と Phase 1 設計」を実施し、コードの大規模変更より先に docs/architecture-audit.md を作成すること。
