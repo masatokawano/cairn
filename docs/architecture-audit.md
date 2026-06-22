@@ -58,10 +58,9 @@ ingest_files(path PK, mtime, size)   -- CLI ログのポーリング差分検知
 | gemini | `f"{time}-{digest}"`、`digest=sha256(time|title_raw)[:16]` (`gemini.py:94`) | **なし**（内容由来で合成） | ✅ 内容が同じなら安定 |
 
 - conversation の安定 ID = `(source, source_id)` の複合一意キー。
-- **message の安定 ID は DB に存在しない。** `ParsedMessage.source_message_id` は
-  claude_cli (`uuid`) / claude_export (`uuid`) で**パースされているが messages テーブルに
-  保存されていない**（`db.upsert_conversations` が INSERT する列に含まれない）。
-  → P1-1 の「message に安定 ID を持たせる」が未達。
+- ~~**message の安定 ID は DB に存在しない。**~~ → **P1-C で解決済み**:
+  `messages.source_message_id` を追加し保存・返却。chatgpt (`msg.id`) / claude_cli /
+  claude_export (`uuid`) はパース済み、codex / gemini は元データに安定 ID が無く None。
 
 ### 1.3 差分インポート（idempotency）
 
@@ -158,16 +157,22 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
   会話単位の失敗カウント用に列を用意したが現状は parse 例外を status=error の run として
   記録（個別会話失敗は warning に含む）。
 
-### P1-C. stable IDs + idempotency 回帰テスト
-- **やること**: (1) `messages` に `source_message_id` 列を追加し
-  `upsert_conversations` で保存。(2) chatgpt/claude_export の `index-{i}` fallback を
-  内容由来ハッシュ（gemini 方式）に置換し順序非依存にする。(3) 「同入力複数回 → 全 skip」
-  「1 メッセージ編集 → updated かつ重複なし」の回帰テストを追加。
-- **受入基準**: 同じ入力を複数回取り込んでも重複ゼロ / 編集会話が差分更新される /
-  message に安定 ID が入る。
-- **リスク**: 中（fallback ID 変更は既存 DB の source_id を変える＝再取り込みで重複の懸念。
-  既存 `index-{i}` データの移行方針を migration で決めること）。
+### P1-C. stable IDs + idempotency 回帰テスト — ✅ 実装済み（2026-06-22、安全コア）
+- **現状**: 完了。`messages.source_message_id` 列を `_SCHEMA` に追加 + migration v3
+  （`_MIGRATION_3_MSG_SOURCE_ID`、`_SCHEMA_VERSION=3`）。`upsert_conversations` で保存、
+  `get_conversation` で返却。source_message_id は chatgpt（`msg.id`）/ claude_cli /
+  claude_export（`uuid`）が既にパース済みのため**パーサー変更は不要**。codex / gemini は
+  元データに安定 message ID が無く None（additive）。`tests/test_idempotency.py`（5件）追加。
+- **fallback ID は変更せず**（ユーザー判断「安全コアのみ」）。理由: `index-{i}` は同一
+  ファイル再取り込みでは既に冪等で受入基準を満たし、内容由来 ID への置換は既存 DB の
+  破壊（redact 後の再計算不一致・タイムスタンプ衝突）リスクが実益を上回るため。
+- **受入基準（達成）**: 同入力の複数回取り込みで重複ゼロ / 編集会話が in-place 更新
+  （会話は1行、messages は全置換）/ message に安定 ID（あるソース）を保存・返却 /
+  backend test 68 passed。
+- **リスク**: 低（additive な列追加のみ。fallback は据え置き）。
 - **依存**: P1-A。
+- **残課題**: chatgpt/claude/gemini の実エクスポート未検証（NOTES.md）。codex の message ID は
+  ローカルログに安定 ID が乏しく未対応。fallback の順序非依存化は将来課題（実益小）。
 
 ### P1-D. integrity-check（admin CLI）
 - **やること**: `app.admin integrity-check` を追加。`PRAGMA integrity_check` /
@@ -250,7 +255,8 @@ P1-H (attachment)  ← 実データ調査を伴うため後半
 
 | 基準 | 現状 | 達成タスク |
 |---|---|---|
-| 同入力の複数取り込みで重複しない | △ 基本動作するが回帰テスト薄い | P1-C |
+| 同入力の複数取り込みで重複しない | ✅ P1-C 実装済み（test_idempotency） | P1-C |
+| message に安定 ID を持たせる | ✅ P1-C（source_message_id、あるソース） | P1-C |
 | migration 後も既存データを検索・表示できる | ✅ P1-A 実装済み（test_migrations） | P1-A |
 | import 履歴（counts/warning/source）を確認できる | ✅ P1-B 実装済み（import_runs） | P1-B |
 | backup → 別 DB として復元できる | ❌ | P1-E |

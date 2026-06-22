@@ -113,18 +113,20 @@ def test_migration_creates_import_runs_on_pre_v2_db(client, tmp_path):
     present and a pre-migration backup taken."""
     c, db, _ = client
     db.connect()
-    # Simulate a pre-v2 DB: drop the table and roll the version back to 1.
+    # Simulate a genuine pre-v2 DB: no import_runs table and no later columns,
+    # version rolled back to 1 (so migrations v2 and v3 both run on reopen).
     conn = db.connect()
     with conn:
         conn.execute("DROP TABLE import_runs")
+        conn.execute("ALTER TABLE messages DROP COLUMN source_message_id")
         conn.execute("PRAGMA user_version = 1")
     conn.close()
     db._local.conn = None
 
     # Reopen → migration runs.
     conn = db.connect()
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     assert conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='import_runs'"
     ).fetchone()[0] == 1
-    assert glob.glob(str(tmp_path / "*.premigrate-v1-to-v2-*"))
+    assert glob.glob(str(tmp_path / "*.premigrate-v1-to-*"))

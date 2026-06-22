@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS messages (
     idx INTEGER NOT NULL,
     role TEXT NOT NULL,
     text TEXT NOT NULL,
-    created_at TEXT
+    created_at TEXT,
+    source_message_id TEXT  -- stable per-message id from the source, when available
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
@@ -126,9 +127,14 @@ CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
 #                   ADD COLUMN, backfills). Append a step and bump
 #                   _SCHEMA_VERSION together. When a migration runs, a backup
 #                   of the DB is taken first.
-_SCHEMA_VERSION = 2
+_MIGRATION_3_MSG_SOURCE_ID = (
+    "ALTER TABLE messages ADD COLUMN source_message_id TEXT;"
+)
+
+_SCHEMA_VERSION = 3
 _MIGRATIONS: list[tuple[int, str]] = [
-    (2, _MIGRATION_2_IMPORT_RUNS),  # add import_runs to pre-v2 DBs
+    (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
+    (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
 ]
 
 
@@ -259,8 +265,10 @@ def upsert_conversations(parsed_list) -> dict:
                 conv_id = cur.lastrowid
                 stats["inserted"] += 1
             conn.executemany(
-                "INSERT INTO messages (conversation_id, idx, role, text, created_at) VALUES (?,?,?,?,?)",
-                [(conv_id, i, m.role, m.text, m.created_at) for i, m in enumerate(pc.messages)],
+                "INSERT INTO messages (conversation_id, idx, role, text, created_at, source_message_id)"
+                " VALUES (?,?,?,?,?,?)",
+                [(conv_id, i, m.role, m.text, m.created_at, m.source_message_id)
+                 for i, m in enumerate(pc.messages)],
             )
     return stats
 
@@ -452,7 +460,8 @@ def get_conversation(conv_id: int) -> dict | None:
     if not conv:
         return None
     msgs = conn.execute(
-        "SELECT id, idx, role, text, created_at FROM messages WHERE conversation_id=? ORDER BY idx",
+        "SELECT id, idx, role, text, created_at, source_message_id"
+        " FROM messages WHERE conversation_id=? ORDER BY idx",
         (conv_id,),
     ).fetchall()
     return {
