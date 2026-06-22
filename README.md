@@ -144,6 +144,7 @@ cd backend
 .venv/bin/python -m app.admin redact-apply   # バックアップ作成→除去→FTS再構築→検証
 .venv/bin/python -m app.admin force-resync   # 全CLIログの強制再取り込み
 .venv/bin/python -m app.admin import-runs    # 取り込み履歴（件数・warning・成否）を表示
+.venv/bin/python -m app.admin integrity-check # DB整合性検査（読み取り専用、問題ありで exit 2）
 ```
 
 ## 取り込み履歴

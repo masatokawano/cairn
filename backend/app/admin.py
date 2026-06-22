@@ -9,12 +9,14 @@ Commands:
   force-resync   Clear ingest_files state so the next CLI sync re-parses
                  every log file (re-ingest goes through redaction).
   import-runs    Print recent import history (counts, warnings, status).
+  integrity-check  Read-only DB consistency audit (exit 2 if problems found).
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
   .venv/bin/python -m app.admin redact-apply [--yes]
   .venv/bin/python -m app.admin force-resync
   .venv/bin/python -m app.admin import-runs [--limit N] [--source S]
+  .venv/bin/python -m app.admin integrity-check
 """
 from __future__ import annotations
 
@@ -180,6 +182,12 @@ def cmd_import_runs(args) -> int:
     return 0
 
 
+def cmd_integrity_check(_args) -> int:
+    report = db.integrity_check()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["ok"] else 2
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +200,7 @@ def main(argv=None) -> int:
     p_runs.add_argument("--limit", type=int, default=20)
     p_runs.add_argument("--source", default=None, help="filter: upload | claude_cli | codex_cli")
     p_runs.set_defaults(func=cmd_import_runs)
+    sub.add_parser("integrity-check").set_defaults(func=cmd_integrity_check)
     args = parser.parse_args(argv)
     return args.func(args)
 

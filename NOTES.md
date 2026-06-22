@@ -15,6 +15,14 @@
 - external content table (`content='messages'`) を使う場合、削除は
   `INSERT INTO messages_fts(messages_fts, rowid, text) VALUES('delete', ...)`
   形式。トリガで自動化済み。
+- **`SELECT COUNT(*) FROM messages_fts` は content table (messages) に proxy する**
+  ため、FTS index の desync 検知には使えない（常に messages 件数と一致する）。
+  実際の indexed 件数は shadow table **`messages_fts_docsize`** を数える
+  （`db.integrity_check()` はこれで件数整合を見る）。
+- FTS5 の構造検査は `INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')`。
+  ただし INSERT 形のため sqlite3 が暗黙トランザクションを開く → 変更はないが
+  後続の `PRAGMA foreign_keys` 等が効かなくなるので、実行後に `conn.rollback()`
+  で閉じること（integrity_check 実装でハマった）。
 
 ## claude CLI ログ (`~/.claude/projects/<エスケープ済cwd>/<sessionId>.jsonl`)
 

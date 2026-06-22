@@ -512,6 +512,90 @@ def stats() -> dict:
     return {"sources": [dict(r) for r in rows]}
 
 
+def integrity_check() -> dict:
+    """Read-only consistency audit (P1-D). Returns {ok, checks, problems}.
+
+    Covers: SQLite structural integrity, orphan messages/attachments, FTS row
+    count + structural integrity, duplicate stable conversation ids, and blank
+    source identifiers. Makes no changes to the DB."""
+    conn = connect()
+    problems: list[str] = []
+    checks: dict = {}
+
+    # 1. SQLite structural integrity.
+    ic = [r[0] for r in conn.execute("PRAGMA integrity_check").fetchall()]
+    checks["sqlite_integrity_check"] = ic
+    if ic != ["ok"]:
+        problems.append(f"PRAGMA integrity_check: {ic}")
+
+    # 2. Orphan messages (parent conversation missing).
+    orphan_msgs = conn.execute(
+        "SELECT COUNT(*) FROM messages m "
+        "LEFT JOIN conversations c ON c.id = m.conversation_id WHERE c.id IS NULL"
+    ).fetchone()[0]
+    checks["orphan_messages"] = orphan_msgs
+    if orphan_msgs:
+        problems.append(f"{orphan_msgs} orphan messages (no parent conversation)")
+
+    # 3. FTS index consistency. Count indexed documents via the _docsize shadow
+    #    table (a plain `COUNT(*) FROM messages_fts` proxies to the content
+    #    table and always matches, so it can't reveal a desync). Then run
+    #    FTS5's own structural integrity-check.
+    msg_count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    fts_count = conn.execute("SELECT COUNT(*) FROM messages_fts_docsize").fetchone()[0]
+    checks["messages"] = msg_count
+    checks["messages_fts"] = fts_count
+    if msg_count != fts_count:
+        problems.append(
+            f"FTS row count mismatch: messages={msg_count} indexed={fts_count}"
+        )
+    try:
+        # This special command makes no changes; roll back the implicit
+        # transaction sqlite3 opens for an INSERT-shaped statement.
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+        conn.rollback()
+        checks["fts_integrity"] = "ok"
+    except sqlite3.DatabaseError as e:
+        conn.rollback()
+        checks["fts_integrity"] = str(e)
+        problems.append(f"FTS integrity-check failed: {e}")
+
+    # 4. Duplicate stable conversation ids (UNIQUE should prevent these).
+    dups = conn.execute(
+        "SELECT source, source_id, COUNT(*) AS n FROM conversations "
+        "GROUP BY source, source_id HAVING n > 1"
+    ).fetchall()
+    checks["duplicate_conversation_ids"] = len(dups)
+    for d in dups:
+        problems.append(
+            f"duplicate stable id (source={d['source']}, source_id={d['source_id']}) x{d['n']}"
+        )
+
+    # 5. Blank source identifiers (referential sanity).
+    blank = conn.execute(
+        "SELECT COUNT(*) FROM conversations "
+        "WHERE source IS NULL OR source='' OR source_id IS NULL OR source_id=''"
+    ).fetchone()[0]
+    checks["blank_source_or_source_id"] = blank
+    if blank:
+        problems.append(f"{blank} conversations with blank source/source_id")
+
+    # 6. Orphan attachments — only if the table exists (P1-H not yet implemented).
+    has_attachments = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='attachments'"
+    ).fetchone()[0]
+    if has_attachments:
+        orphan_att = conn.execute(
+            "SELECT COUNT(*) FROM attachments a "
+            "LEFT JOIN conversations c ON c.id = a.conversation_id WHERE c.id IS NULL"
+        ).fetchone()[0]
+        checks["orphan_attachments"] = orphan_att
+        if orphan_att:
+            problems.append(f"{orphan_att} orphan attachments")
+
+    return {"ok": not problems, "checks": checks, "problems": problems}
+
+
 def file_state(path: str) -> tuple | None:
     row = connect().execute(
         "SELECT mtime, size FROM ingest_files WHERE path=?", (path,)

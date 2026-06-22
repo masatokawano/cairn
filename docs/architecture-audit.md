@@ -174,13 +174,20 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **残課題**: chatgpt/claude/gemini の実エクスポート未検証（NOTES.md）。codex の message ID は
   ローカルログに安定 ID が乏しく未対応。fallback の順序非依存化は将来課題（実益小）。
 
-### P1-D. integrity-check（admin CLI）
-- **やること**: `app.admin integrity-check` を追加。`PRAGMA integrity_check` /
-  orphan message・attachment / FTS 件数整合（`messages` 件数 vs FTS）/ stable ID 重複 /
-  source_id ↔ conversation 参照整合 を検査して JSON 報告。
-- **受入基準**: 正常 DB で問題ゼロ / 故意に壊した DB で各問題を検出 / 読み取り専用。
+### P1-D. integrity-check（admin CLI）— ✅ 実装済み（2026-06-22）
+- **現状**: 完了。`db.integrity_check()`（読み取り専用、`{ok, checks, problems}` を返す）
+  + `python -m app.admin integrity-check`（問題ありで exit 2）。検査項目:
+  ① `PRAGMA integrity_check` ② orphan messages ③ FTS 件数整合（`messages_fts_docsize` で
+  実 indexed 件数を比較）＋ FTS5 `integrity-check` 構造検査 ④ stable ID 重複
+  （`(source, source_id)`）⑤ blank source/source_id ⑥ orphan attachments（テーブルが
+  存在する場合のみ＝P1-H 未実装なので現状スキップ）。`tests/test_integrity.py`（5件）。
+- **受入基準（達成）**: 正常 DB で `ok=True`・problems 空 / orphan・FTS desync・blank source を
+  故意に壊して検出 / admin の exit code（0/2）/ 読み取り専用（FTS integrity-check の暗黙
+  トランザクションは rollback で閉じる）/ backend test 73 passed。
+- **学び（NOTES.md）**: `COUNT(*) FROM messages_fts` は content table に proxy し desync を
+  検知できない → `messages_fts_docsize` を使う。
 - **リスク**: 低（読み取りのみ）。
-- **依存**: なし（P1-C 後だと stable ID 検査が意味を持つ）。
+- **依存**: なし（P1-C 後で stable ID 検査が有効）。
 
 ### P1-E. backup（admin CLI）
 - **やること**: `app.admin backup [--out PATH]`。checkpoint(TRUNCATE) 後に
