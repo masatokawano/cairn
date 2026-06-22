@@ -143,7 +143,17 @@ cd backend
 .venv/bin/python -m app.admin redact-scan    # dry-run: provider別の検出件数を表示
 .venv/bin/python -m app.admin redact-apply   # バックアップ作成→除去→FTS再構築→検証
 .venv/bin/python -m app.admin force-resync   # 全CLIログの強制再取り込み
+.venv/bin/python -m app.admin import-runs    # 取り込み履歴（件数・warning・成否）を表示
 ```
+
+## 取り込み履歴
+
+取り込み（アップロード／CLI同期）は1入力ごとに `import_runs` テーブルへ記録されます
+（source / 入力名 / 日時 / parser version / inserted・updated・skipped 件数 /
+warning 概要 / content hash / 成否）。
+
+- 管理CLI: `python -m app.admin import-runs [--limit N] [--source upload|claude_cli|codex_cli]`
+- API: `GET /api/import-runs?limit=&offset=&source=`
 
 `redact-apply` が作るバックアップ（`cairn.db.backup-*`）には**平文が残る**ため、
 確認後に削除してください。

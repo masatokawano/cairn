@@ -8,6 +8,7 @@ testing) can be allowed via CAIRN_ALLOW_HOSTS, with a loud warning.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from urllib.parse import urlparse
@@ -17,7 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import cli_sync, db
-from .parsers import FileTooLargeError, UnknownFormatError, parse_upload
+from .parsers import PARSER_VERSION, FileTooLargeError, UnknownFormatError, parse_upload
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cairn")
@@ -106,16 +107,35 @@ async def import_file(file: UploadFile, request: Request):
             detail=f"ファイルが大きすぎます (上限 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB)",
         )
     raw = await _read_upload_capped(file)
+    name = file.filename or "upload.json"
+    started = db.utcnow_iso()
+    content_hash = hashlib.sha256(raw).hexdigest()
+
+    def _record_error(status_code: int, message: str):
+        db.record_import_run(
+            source="upload", input_name=name, started_at=started,
+            completed_at=db.utcnow_iso(), content_hash=content_hash,
+            status="error", error=message,
+        )
+        return HTTPException(status_code=status_code, detail=message)
+
     try:
-        result = parse_upload(file.filename or "upload.json", raw)
+        result = parse_upload(name, raw)
     except FileTooLargeError as e:
-        raise HTTPException(status_code=413, detail=str(e))
+        raise _record_error(413, str(e))
     except UnknownFormatError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise _record_error(422, str(e))
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=422, detail=f"パースに失敗しました: {e}")
+        raise _record_error(422, f"パースに失敗しました: {e}")
     with cli_sync.ingest_lock:
         stats = db.upsert_conversations(result.conversations)
+    db.record_import_run(
+        source="upload", input_name=name, started_at=started,
+        completed_at=db.utcnow_iso(), parser_version=PARSER_VERSION,
+        inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
+        conversations=len(result.conversations), warnings=result.warnings,
+        content_hash=content_hash, status="ok",
+    )
     return {
         "filename": file.filename,
         "conversations": len(result.conversations),
@@ -158,6 +178,13 @@ def conversation(conv_id: int):
 @app.get("/api/stats")
 def stats():
     return db.stats()
+
+
+@app.get("/api/import-runs")
+def import_runs(
+    limit: int = Query(50, le=500), offset: int = 0, source: str | None = None
+):
+    return {"results": db.list_import_runs(limit=limit, offset=offset, source=source)}
 
 
 # Serve the built frontend if present (production mode: single process).

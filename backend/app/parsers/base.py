@@ -10,6 +10,11 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
+# Suite-level parser version, recorded in import_runs so an import's output can
+# be traced to the parser logic that produced it. Bump whenever parser output
+# for the same input could change (per-parser versioning is a future refinement).
+PARSER_VERSION = "1"
+
 
 @dataclass
 class ParsedMessage:

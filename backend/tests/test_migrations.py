@@ -52,10 +52,12 @@ def test_fresh_db_stamped_to_current_version(db):
 def test_fresh_db_does_not_run_migrations(db, monkeypatch, tmp_path):
     # Even with a pending migration defined, a fresh DB must not run it (the
     # latest _SCHEMA already represents that version) and must not back up.
-    monkeypatch.setattr(db, "_MIGRATIONS", [(2, "ALTER TABLE conversations ADD COLUMN never_runs INTEGER;")])
-    monkeypatch.setattr(db, "_SCHEMA_VERSION", 2)
+    nxt = db._SCHEMA_VERSION + 1
+    monkeypatch.setattr(db, "_MIGRATIONS",
+                        [(nxt, "ALTER TABLE conversations ADD COLUMN never_runs INTEGER;")])
+    monkeypatch.setattr(db, "_SCHEMA_VERSION", nxt)
     db.connect()
-    assert _user_version(db) == 2
+    assert _user_version(db) == nxt
     cols = [r[1] for r in db.connect().execute("PRAGMA table_info(conversations)")]
     assert "never_runs" not in cols
     assert glob.glob(str(tmp_path / "*.premigrate-*")) == []
@@ -63,22 +65,24 @@ def test_fresh_db_does_not_run_migrations(db, monkeypatch, tmp_path):
 
 def test_existing_db_migrated_with_backup(db, monkeypatch, tmp_path):
     # 1. Build an existing DB at the current version with real data.
+    base = db._SCHEMA_VERSION
     db.upsert_conversations([make_conv(db)])
-    assert _user_version(db) == 1
+    assert _user_version(db) == base
     _reset_conn(db)
 
     # 2. Ship a new migration that adds a column; bump the target version.
+    nxt = base + 1
     monkeypatch.setattr(
         db, "_MIGRATIONS",
-        [(2, "ALTER TABLE conversations ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;")],
+        [(nxt, "ALTER TABLE conversations ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;")],
     )
-    monkeypatch.setattr(db, "_SCHEMA_VERSION", 2)
+    monkeypatch.setattr(db, "_SCHEMA_VERSION", nxt)
 
     # 3. Reopening applies the pending migration.
     db.connect()
 
     # version bumped, new column present
-    assert _user_version(db) == 2
+    assert _user_version(db) == nxt
     cols = [r[1] for r in db.connect().execute("PRAGMA table_info(conversations)")]
     assert "priority" in cols
 
@@ -88,27 +92,28 @@ def test_existing_db_migrated_with_backup(db, monkeypatch, tmp_path):
     assert db.search("本文")[0]["conversation_id"] == 1
 
     # a pre-migration backup was created (and is locked down)
-    backups = glob.glob(str(tmp_path / "*.premigrate-v1-to-v2-*"))
+    backups = glob.glob(str(tmp_path / f"*.premigrate-v{base}-to-v{nxt}-*"))
     assert len(backups) == 1
     assert oct(os.stat(backups[0]).st_mode & 0o777) == "0o600"
 
 
 def test_migrations_run_in_order_and_are_idempotent(db, monkeypatch):
+    base = db._SCHEMA_VERSION
     db.upsert_conversations([make_conv(db)])
     _reset_conn(db)
 
     monkeypatch.setattr(db, "_MIGRATIONS", [
-        (2, "ALTER TABLE conversations ADD COLUMN a INTEGER DEFAULT 0;"),
-        (3, "ALTER TABLE conversations ADD COLUMN b INTEGER DEFAULT 0;"),
+        (base + 1, "ALTER TABLE conversations ADD COLUMN a INTEGER DEFAULT 0;"),
+        (base + 2, "ALTER TABLE conversations ADD COLUMN b INTEGER DEFAULT 0;"),
     ])
-    monkeypatch.setattr(db, "_SCHEMA_VERSION", 3)
+    monkeypatch.setattr(db, "_SCHEMA_VERSION", base + 2)
 
     db.connect()
-    assert _user_version(db) == 3
+    assert _user_version(db) == base + 2
     cols = [r[1] for r in db.connect().execute("PRAGMA table_info(conversations)")]
     assert {"a", "b"} <= set(cols)
 
     # Reopening at the latest version is a no-op (no error, no re-run).
     _reset_conn(db)
     db.connect()
-    assert _user_version(db) == 3
+    assert _user_version(db) == base + 2

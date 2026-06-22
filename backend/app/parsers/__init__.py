@@ -7,7 +7,10 @@ import os
 import zipfile
 
 from . import chatgpt, claude_export, gemini
-from .base import ParseResult
+from .base import PARSER_VERSION, ParseResult
+
+__all__ = ["PARSER_VERSION", "ParseResult", "parse_upload",
+           "UnknownFormatError", "FileTooLargeError"]
 
 # Detection order matters: chatgpt's `mapping` and claude's `chat_messages`
 # are unambiguous; gemini's header check is the loosest, so it goes last.

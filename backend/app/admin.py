@@ -8,11 +8,13 @@ Commands:
                  no pattern remains in rows or raw DB file bytes.
   force-resync   Clear ingest_files state so the next CLI sync re-parses
                  every log file (re-ingest goes through redaction).
+  import-runs    Print recent import history (counts, warnings, status).
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
   .venv/bin/python -m app.admin redact-apply [--yes]
   .venv/bin/python -m app.admin force-resync
+  .venv/bin/python -m app.admin import-runs [--limit N] [--source S]
 """
 from __future__ import annotations
 
@@ -172,6 +174,12 @@ def cmd_force_resync(_args) -> int:
     return 0
 
 
+def cmd_import_runs(args) -> int:
+    runs = db.list_import_runs(limit=args.limit, source=args.source)
+    print(json.dumps(runs, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -180,6 +188,10 @@ def main(argv=None) -> int:
     p_apply.add_argument("--yes", action="store_true", help="skip confirmation prompt")
     p_apply.set_defaults(func=cmd_apply)
     sub.add_parser("force-resync").set_defaults(func=cmd_force_resync)
+    p_runs = sub.add_parser("import-runs")
+    p_runs.add_argument("--limit", type=int, default=20)
+    p_runs.add_argument("--source", default=None, help="filter: upload | claude_cli | codex_cli")
+    p_runs.set_defaults(func=cmd_import_runs)
     args = parser.parse_args(argv)
     return args.func(args)
 

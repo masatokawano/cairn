@@ -8,12 +8,13 @@ editor/atomic-rename weirdness.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
 
 from . import db
-from .parsers import claude_cli, codex_cli
+from .parsers import PARSER_VERSION, claude_cli, codex_cli
 
 log = logging.getLogger("cairn.sync")
 
@@ -61,9 +62,9 @@ def try_scan_once() -> dict | None:
 def _scan() -> dict:
     totals = {"files_scanned": 0, "files_imported": 0,
               "inserted": 0, "updated": 0, "skipped": 0, "warnings": []}
-    for root, parser in (
-        (CLAUDE_PROJECTS_DIR, claude_cli),
-        (CODEX_SESSIONS_DIR, codex_cli),
+    for root, parser, src in (
+        (CLAUDE_PROJECTS_DIR, claude_cli, "claude_cli"),
+        (CODEX_SESSIONS_DIR, codex_cli, "codex_cli"),
     ):
         for path in _iter_jsonl(root):
             totals["files_scanned"] += 1
@@ -73,15 +74,28 @@ def _scan() -> dict:
                 continue
             if db.file_state(path) == (st.st_mtime, st.st_size):
                 continue
+            started = db.utcnow_iso()
             try:
                 with open(path, encoding="utf-8", errors="replace") as f:
                     content = f.read()
                 result = parser.parse_file(path, content)
             except Exception as e:  # noqa: BLE001 — one bad file must not stop the sync
                 totals["warnings"].append(f"{path}: {e}")
+                db.record_import_run(
+                    source=src, input_name=path, started_at=started,
+                    completed_at=db.utcnow_iso(), status="error", error=str(e),
+                )
                 continue
             stats = db.upsert_conversations(result.conversations)
             db.record_file_state(path, st.st_mtime, st.st_size)
+            db.record_import_run(
+                source=src, input_name=path, started_at=started,
+                completed_at=db.utcnow_iso(), parser_version=PARSER_VERSION,
+                inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
+                conversations=len(result.conversations), warnings=result.warnings,
+                content_hash=hashlib.sha256(content.encode("utf-8", "replace")).hexdigest(),
+                status="ok",
+            )
             totals["files_imported"] += 1
             for k in ("inserted", "updated", "skipped"):
                 totals[k] += stats[k]

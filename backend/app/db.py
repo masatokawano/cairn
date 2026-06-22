@@ -67,6 +67,51 @@ CREATE TABLE IF NOT EXISTS ingest_files (
     mtime REAL NOT NULL,
     size INTEGER NOT NULL
 );
+
+-- Import history (P1-B): one row per ingest of a single input (an uploaded
+-- file, or one CLI log file). Records counts, warnings, parser version, and
+-- the input's content hash for auditability.
+CREATE TABLE IF NOT EXISTS import_runs (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,          -- "upload" | "claude_cli" | "codex_cli"
+    input_name TEXT,              -- uploaded filename or log path
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    parser_version TEXT,
+    inserted INTEGER NOT NULL DEFAULT 0,
+    updated INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    conversations INTEGER NOT NULL DEFAULT 0,
+    warnings INTEGER NOT NULL DEFAULT 0,
+    warning_summary TEXT,
+    content_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',  -- "ok" | "error"
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
+"""
+
+_MIGRATION_2_IMPORT_RUNS = """
+CREATE TABLE IF NOT EXISTS import_runs (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    input_name TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    parser_version TEXT,
+    inserted INTEGER NOT NULL DEFAULT 0,
+    updated INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    conversations INTEGER NOT NULL DEFAULT 0,
+    warnings INTEGER NOT NULL DEFAULT 0,
+    warning_summary TEXT,
+    content_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
 """
 
 
@@ -81,8 +126,10 @@ CREATE TABLE IF NOT EXISTS ingest_files (
 #                   ADD COLUMN, backfills). Append a step and bump
 #                   _SCHEMA_VERSION together. When a migration runs, a backup
 #                   of the DB is taken first.
-_SCHEMA_VERSION = 1
-_MIGRATIONS: list[tuple[int, str]] = []
+_SCHEMA_VERSION = 2
+_MIGRATIONS: list[tuple[int, str]] = [
+    (2, _MIGRATION_2_IMPORT_RUNS),  # add import_runs to pre-v2 DBs
+]
 
 
 def _backup_before_migration(
@@ -216,6 +263,63 @@ def upsert_conversations(parsed_list) -> dict:
                 [(conv_id, i, m.role, m.text, m.created_at) for i, m in enumerate(pc.messages)],
             )
     return stats
+
+
+def utcnow_iso() -> str:
+    """Timestamp helper for import_runs (ISO8601, UTC)."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def record_import_run(
+    *,
+    source: str,
+    input_name: str | None,
+    started_at: str,
+    completed_at: str | None = None,
+    parser_version: str | None = None,
+    inserted: int = 0,
+    updated: int = 0,
+    skipped: int = 0,
+    failed: int = 0,
+    conversations: int = 0,
+    warnings: list[str] | None = None,
+    content_hash: str | None = None,
+    status: str = "ok",
+    error: str | None = None,
+) -> int:
+    """Record one import of a single input. Returns the new run's id."""
+    warnings = warnings or []
+    summary = "\n".join(warnings)[:2000] if warnings else None
+    conn = connect()
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO import_runs
+               (source, input_name, started_at, completed_at, parser_version,
+                inserted, updated, skipped, failed, conversations,
+                warnings, warning_summary, content_hash, status, error)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (source, input_name, started_at, completed_at, parser_version,
+             inserted, updated, skipped, failed, conversations,
+             len(warnings), summary, content_hash, status, error),
+        )
+    return cur.lastrowid
+
+
+def list_import_runs(
+    limit: int = 50, offset: int = 0, source: str | None = None
+) -> list[dict]:
+    conn = connect()
+    conds, params = [], []
+    if source:
+        conds.append("source = ?")
+        params.append(source)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params += [limit, offset]
+    rows = conn.execute(
+        f"SELECT * FROM import_runs {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def _fts_query(q: str) -> str:

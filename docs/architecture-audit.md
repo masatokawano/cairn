@@ -138,16 +138,25 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **リスク**: 低（既存スキーマは冪等、追加のみ）。
 - **依存**: なし（最初に実施推奨。他タスクの schema 変更の前提）。
 
-### P1-B. import run history
-- **やること**: `import_runs` テーブル（source, input_path/filename, started_at,
-  completed_at, parser_version, inserted/updated/skipped/failed, warning_summary,
-  content_hash）を追加。`upsert_conversations` 経路と CLI sync / `/api/import` で記録。
-  parser に version 定数を持たせる。API or admin CLI で履歴参照。
-- **受入基準**: import/sync 後に 1 run 行が残る / counts と warning が確認できる /
-  既存テスト回帰なし。
+### P1-B. import run history — ✅ 実装済み（2026-06-22）
+- **現状**: 完了。`import_runs` テーブル（source / input_name / started_at /
+  completed_at / parser_version / inserted・updated・skipped・failed・conversations /
+  warnings・warning_summary / content_hash / status・error）を `_SCHEMA` に追加し、
+  migration v2（`_MIGRATION_2_IMPORT_RUNS`、`_SCHEMA_VERSION=2`）で既存DBにも適用
+  （P1-A の migration runner の初実運用）。記録は `db.record_import_run()` を
+  各 ingest 経路の呼び出し側（`/api/import` 成功・失敗、CLI sync のファイル単位）から行う。
+  `upsert_conversations` 自体は純粋なまま（source/path は呼び出し側が保持するため）。
+  parser version は `parsers/base.py: PARSER_VERSION`（suite 単位、将来 per-parser 化）。
+  参照は `GET /api/import-runs` と `python -m app.admin import-runs`。
+- **受入基準（達成）**: upload/sync 後に run 行が残る（成功は ok、失敗は error+理由）/
+  counts・warning_summary・content_hash が確認できる / API・admin CLI から履歴参照可 /
+  backend test 63 passed。
 - **リスク**: 低〜中（全 ingest 経路に記録を挿す。choke point は `upsert_conversations` だが
-  source/path 情報は呼び出し側にあるため引数追加が必要）。
-- **依存**: P1-A（schema 追加なので migration 経由が望ましい）。
+  source/path 情報は呼び出し側にあるため呼び出し側で記録）。
+- **依存**: P1-A（migration 経由で既存DBに table 追加）。
+- **残課題**: Web UI への履歴/ warning 表示は未実装（Codex 項目6・別タスク）。failed は
+  会話単位の失敗カウント用に列を用意したが現状は parse 例外を status=error の run として
+  記録（個別会話失敗は warning に含む）。
 
 ### P1-C. stable IDs + idempotency 回帰テスト
 - **やること**: (1) `messages` に `source_message_id` 列を追加し
@@ -242,7 +251,8 @@ P1-H (attachment)  ← 実データ調査を伴うため後半
 | 基準 | 現状 | 達成タスク |
 |---|---|---|
 | 同入力の複数取り込みで重複しない | △ 基本動作するが回帰テスト薄い | P1-C |
-| migration 後も既存データを検索・表示できる | △ 骨格のみ・テスト無し | P1-A |
+| migration 後も既存データを検索・表示できる | ✅ P1-A 実装済み（test_migrations） | P1-A |
+| import 履歴（counts/warning/source）を確認できる | ✅ P1-B 実装済み（import_runs） | P1-B |
 | backup → 別 DB として復元できる | ❌ | P1-E |
 | JSONL/Markdown export | ❌ | P1-F / P1-G |
 | 破損行・未知フィールドでも可能範囲を取り込み warning | ✅ | （実装済み・維持） |
