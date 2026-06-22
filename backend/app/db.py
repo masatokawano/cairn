@@ -1,13 +1,18 @@
 """SQLite layer: schema, diff import, and search (FTS5 trigram + LIKE fallback)."""
 from __future__ import annotations
 
+import datetime
 import json
+import logging
 import os
 import re
+import shutil
 import sqlite3
 import threading
 
 from . import redact
+
+log = logging.getLogger("cairn.db")
 
 DB_PATH = os.environ.get(
     "CAIRN_DB", os.path.join(os.path.dirname(__file__), "..", "data", "cairn.db")
@@ -65,21 +70,58 @@ CREATE TABLE IF NOT EXISTS ingest_files (
 """
 
 
-# Schema versioning via PRAGMA user_version. The base _SCHEMA is idempotent
-# (IF NOT EXISTS everywhere) and always executed; _MIGRATIONS is for future
-# non-idempotent changes: append (version, sql) and bump _SCHEMA_VERSION.
+# Schema versioning via PRAGMA user_version.
+#
+# Two complementary mechanisms:
+#   _SCHEMA       — always the LATEST shape, idempotent (IF NOT EXISTS). A
+#                   *fresh* DB is built from this and stamped to the current
+#                   version directly; it never runs migrations.
+#   _MIGRATIONS   — ordered (version, sql) steps that transform an *existing*
+#                   DB whose data IF NOT EXISTS cannot fix (e.g. ALTER TABLE
+#                   ADD COLUMN, backfills). Append a step and bump
+#                   _SCHEMA_VERSION together. When a migration runs, a backup
+#                   of the DB is taken first.
 _SCHEMA_VERSION = 1
 _MIGRATIONS: list[tuple[int, str]] = []
 
 
-def _apply_migrations(conn: sqlite3.Connection) -> None:
+def _backup_before_migration(
+    conn: sqlite3.Connection, db_path: str, from_version: int, to_version: int
+) -> str:
+    """Copy the DB before applying migrations so an unwanted or failed
+    migration can be rolled back. Checkpoint first so the copied main file is
+    self-contained (no pending WAL)."""
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error:
+        pass  # checkpoint is best-effort; copy proceeds regardless
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = f"{db_path}.premigrate-v{from_version}-to-v{to_version}-{stamp}"
+    shutil.copy2(db_path, backup_path)
+    try:
+        os.chmod(backup_path, 0o600)  # backup holds plaintext conversation data
+    except OSError:
+        pass
+    log.warning(
+        "schema migration v%d→v%d: backup created at %s "
+        "(contains plaintext; delete once the migration is confirmed)",
+        from_version, to_version, backup_path,
+    )
+    return backup_path
+
+
+def _apply_migrations(conn: sqlite3.Connection, db_path: str) -> None:
+    """Bring an existing DB up to _SCHEMA_VERSION by running pending migrations.
+    Called only for non-fresh DBs (see connect())."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    for target, sql in _MIGRATIONS:
-        if version < target:
-            with conn:
-                conn.executescript(sql)
-                conn.execute(f"PRAGMA user_version = {target}")
-            version = target
+    pending = [(t, sql) for t, sql in _MIGRATIONS if version < t]
+    if pending:
+        _backup_before_migration(conn, db_path, version, pending[-1][0])
+    for target, sql in pending:
+        with conn:
+            conn.executescript(sql)
+            conn.execute(f"PRAGMA user_version = {target}")
+        version = target
     if version < _SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
@@ -109,8 +151,18 @@ def connect() -> sqlite3.Connection:
         # Overwrite deleted content with zeros so secrets don't linger in
         # free pages / WAL after deletes and updates.
         conn.execute("PRAGMA secure_delete = ON")
+        # A fresh DB (no tables yet) is built from the latest _SCHEMA and
+        # stamped directly — it must NOT run migrations meant for older shapes.
+        # An existing DB (tables present, possibly pre-versioning at v0) is
+        # migrated up to _SCHEMA_VERSION.
+        is_fresh = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
         conn.executescript(_SCHEMA)
-        _apply_migrations(conn)
+        if is_fresh:
+            conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+        else:
+            _apply_migrations(conn, db_path)
         _restrict_permissions(db_path)
         _local.conn = conn
     return conn

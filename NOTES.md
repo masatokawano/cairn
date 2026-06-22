@@ -84,6 +84,24 @@
 - MCPブラウザ(Docker内)から動作確認するときは `host.docker.internal` を使い、
   サーバーを一時的に `--host 0.0.0.0` で起動する必要がある（通常は127.0.0.1）。
 
+## スキーマ migration（P1-A / `db.py`）
+
+- バージョンは `PRAGMA user_version`。2つの仕組みを併用する:
+  - `_SCHEMA` … 常に最新形。冪等（IF NOT EXISTS）。**新規DBはこれで作り
+    user_version を直接スタンプ。migration は走らせない**。
+  - `_MIGRATIONS` … 既存DBを上げる `(version, sql)` の順序付きリスト
+    （ALTER TABLE ADD COLUMN や backfill など IF NOT EXISTS で直せないもの）。
+    ステップ追加時は `_SCHEMA_VERSION` も同時に上げる。
+- **新規DBと既存DBの判定は `connect()` 内で「conversations テーブルが既に
+  存在するか」で行う**。両者とも初期 user_version は 0 で区別できないため、
+  テーブル有無で見る。これで新規DBに古い migration を誤適用しない。
+- **migration 実行時は事前にDBを自動バックアップ**
+  （`cairn.db.premigrate-v{from}-to-v{to}-{stamp}`、0600）。
+  バックアップには平文が残るので、migration 確認後に削除すること（復旧手順）。
+- 新しい migration を足すときは: ① `_SCHEMA` を最新形に更新（新規DB用）
+  ② `_MIGRATIONS` に既存DB変換SQLを追加 ③ `_SCHEMA_VERSION` を +1
+  ④ `tests/test_migrations.py` にダミー以外の回帰を追加。
+
 ## Phase 2a: MCPサーバー + シークレット除去（2026-06-12）
 
 - MCP公式SDK（FastMCP）はSTDIOがデフォルト。`@mcp.tool()` はデコレート後も
