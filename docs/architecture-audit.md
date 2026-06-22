@@ -189,10 +189,13 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **リスク**: 低（読み取りのみ）。
 - **依存**: なし（P1-C 後で stable ID 検査が有効）。
 
-### P1-E. backup（admin CLI）
-- **やること**: `app.admin backup [--out PATH]`。checkpoint(TRUNCATE) 後に
-  整合性のある単一ファイルをコピー（既存 redact-apply のロジックを共通化）。
-- **受入基準**: backup を別 DB として開いて検索・表示できる。
+### P1-E. backup（admin CLI）— ✅ 実装済み（2026-06-22）
+- **現状**: 完了。`db.backup(out_path=None)`（checkpoint(TRUNCATE) → copy → 0600、
+  デフォルト `<db>.backup-<stamp>`）を追加し、`python -m app.admin backup [--out PATH]` で
+  実行。既存 redact-apply の inline バックアップを `db.backup()` に共通化（cmd_apply 経由の
+  既存テストも通過）。復元は backup を戻すか `CAIRN_DB` を向ける。`tests/test_backup.py`（3件）。
+- **受入基準（達成）**: backup を別 DB として開いて検索・get_conversation・integrity_check が
+  通る（原本を破壊しても backup は独立コピー）/ 0600 / backend test 76 passed。
 - **リスク**: 低。
 - **依存**: なし。
 
@@ -266,7 +269,7 @@ P1-H (attachment)  ← 実データ調査を伴うため後半
 | message に安定 ID を持たせる | ✅ P1-C（source_message_id、あるソース） | P1-C |
 | migration 後も既存データを検索・表示できる | ✅ P1-A 実装済み（test_migrations） | P1-A |
 | import 履歴（counts/warning/source）を確認できる | ✅ P1-B 実装済み（import_runs） | P1-B |
-| backup → 別 DB として復元できる | ❌ | P1-E |
+| backup → 別 DB として復元できる | ✅ P1-E 実装済み（test_backup） | P1-E |
 | JSONL/Markdown export | ❌ | P1-F / P1-G |
 | 破損行・未知フィールドでも可能範囲を取り込み warning | ✅ | （実装済み・維持） |
 | backend test 全通過 | ✅ 53 passed | （各タスクで維持） |

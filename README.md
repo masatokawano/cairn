@@ -145,7 +145,11 @@ cd backend
 .venv/bin/python -m app.admin force-resync   # 全CLIログの強制再取り込み
 .venv/bin/python -m app.admin import-runs    # 取り込み履歴（件数・warning・成否）を表示
 .venv/bin/python -m app.admin integrity-check # DB整合性検査（読み取り専用、問題ありで exit 2）
+.venv/bin/python -m app.admin backup         # DBの一貫したコピーを作成（0600）
 ```
+
+バックアップは `<db>.backup-<日時>`（`--out PATH` で変更可）に作られ、平文を含むため
+`0600` に制限されます。復元はそのファイルを戻すか `CAIRN_DB` をそれに向けます。
 
 ## 取り込み履歴
 

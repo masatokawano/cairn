@@ -10,6 +10,9 @@ Commands:
                  every log file (re-ingest goes through redaction).
   import-runs    Print recent import history (counts, warnings, status).
   integrity-check  Read-only DB consistency audit (exit 2 if problems found).
+  backup         Write a consistent single-file copy of the DB (contains
+                 plaintext; locked to 0600). Restore by copying it back or
+                 pointing CAIRN_DB at it.
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -17,14 +20,13 @@ Usage:
   .venv/bin/python -m app.admin force-resync
   .venv/bin/python -m app.admin import-runs [--limit N] [--source S]
   .venv/bin/python -m app.admin integrity-check
+  .venv/bin/python -m app.admin backup [--out PATH]
 """
 from __future__ import annotations
 
 import argparse
-import datetime
 import json
 import os
-import shutil
 import sys
 
 from . import db, redact
@@ -120,11 +122,8 @@ def cmd_apply(args) -> int:
 
     conn = db.connect()
 
-    # 1. Backup (checkpoint first so the main file is complete on its own).
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_path = f"{db_path}.backup-{stamp}"
-    shutil.copy2(db_path, backup_path)
+    # 1. Backup before the destructive rewrite (shared with the `backup` cmd).
+    backup_path = db.backup()
     print(f"backup: {backup_path}")
 
     # 2. Rewrite messages and titles (messages_au trigger keeps FTS in sync,
@@ -188,6 +187,18 @@ def cmd_integrity_check(_args) -> int:
     return 0 if report["ok"] else 2
 
 
+def cmd_backup(args) -> int:
+    db_path = os.path.abspath(db.DB_PATH)
+    if not os.path.exists(db_path):
+        print(f"DB not found: {db_path}", file=sys.stderr)
+        return 1
+    path = db.backup(args.out)
+    print(f"backup: {path}")
+    print("note: the backup contains plaintext conversation data (0600). "
+          "Restore by copying it back or setting CAIRN_DB to it.")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -201,6 +212,9 @@ def main(argv=None) -> int:
     p_runs.add_argument("--source", default=None, help="filter: upload | claude_cli | codex_cli")
     p_runs.set_defaults(func=cmd_import_runs)
     sub.add_parser("integrity-check").set_defaults(func=cmd_integrity_check)
+    p_backup = sub.add_parser("backup")
+    p_backup.add_argument("--out", default=None, help="destination path (default: <db>.backup-<timestamp>)")
+    p_backup.set_defaults(func=cmd_backup)
     args = parser.parse_args(argv)
     return args.func(args)
 

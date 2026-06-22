@@ -512,6 +512,32 @@ def stats() -> dict:
     return {"sources": [dict(r) for r in rows]}
 
 
+def backup(out_path: str | None = None) -> str:
+    """Create a consistent single-file copy of the DB and return its path.
+
+    Checkpoints the WAL first so the copied main file is self-contained.
+    Default destination is `<db>.backup-<timestamp>`. The copy contains
+    plaintext conversation data, so it is locked down to 0600. Restore by
+    copying the file back or pointing CAIRN_DB at it.
+    """
+    conn = connect()
+    db_path = os.path.abspath(DB_PATH)
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error:
+        pass  # best-effort; copy proceeds regardless
+    if out_path is None:
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_path = f"{db_path}.backup-{stamp}"
+    out_path = os.path.abspath(out_path)
+    shutil.copy2(db_path, out_path)
+    try:
+        os.chmod(out_path, 0o600)
+    except OSError:
+        pass
+    return out_path
+
+
 def integrity_check() -> dict:
     """Read-only consistency audit (P1-D). Returns {ok, checks, problems}.
 

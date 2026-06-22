@@ -1,0 +1,77 @@
+"""Tests for the backup command (P1-E): a consistent copy that opens and
+searches standalone as a separate DB."""
+import glob
+import importlib
+import os
+
+import pytest
+
+
+@pytest.fixture()
+def db(tmp_path, monkeypatch):
+    monkeypatch.setenv("CAIRN_DB", str(tmp_path / "test.db"))
+    from app import db as db_module
+    importlib.reload(db_module)
+    yield db_module
+    conn = getattr(db_module._local, "conn", None)
+    if conn:
+        conn.close()
+        db_module._local.conn = None
+
+
+def make_conv(db, source_id="c1"):
+    from app.parsers.base import ParsedConversation, ParsedMessage
+    return ParsedConversation(
+        source="chatgpt", source_id=source_id, title="バックアップ対象",
+        messages=[ParsedMessage(role="user", text="検索できる本文", created_at="2025-01-01T00:00:00Z")],
+        created_at="2025-01-01T00:00:00Z", updated_at="2025-01-01T00:10:00Z",
+    )
+
+
+def _reset_conn(db):
+    conn = getattr(db._local, "conn", None)
+    if conn:
+        conn.close()
+        db._local.conn = None
+
+
+def test_backup_default_path(db, tmp_path):
+    db.upsert_conversations([make_conv(db)])
+    path = db.backup()
+    assert os.path.exists(path)
+    assert glob.glob(str(tmp_path / "test.db.backup-*"))
+    assert oct(os.stat(path).st_mode & 0o777) == "0o600"
+
+
+def test_backup_opens_and_searches_standalone(db, tmp_path, monkeypatch):
+    db.upsert_conversations([make_conv(db)])
+    out = db.backup(str(tmp_path / "snapshot.db"))
+
+    # Mutate the original so we can prove the backup is an independent copy.
+    conn = db.connect()
+    with conn:
+        conn.execute("DELETE FROM messages")
+        conn.execute("DELETE FROM conversations")
+    _reset_conn(db)
+
+    # Reopen the backup as the active DB and confirm it is fully usable.
+    monkeypatch.setenv("CAIRN_DB", out)
+    importlib.reload(db)
+    results = db.search("本文")
+    assert len(results) == 1
+    assert results[0]["title"] == "バックアップ対象"
+    full = db.get_conversation(results[0]["conversation_id"])
+    assert full and full["messages"][0]["text"] == "検索できる本文"
+    report = db.integrity_check()
+    assert report["ok"] is True
+
+
+def test_admin_backup_command(db, tmp_path, capsys):
+    from app import admin
+    importlib.reload(admin)
+    db.upsert_conversations([make_conv(db)])
+    out = str(tmp_path / "cli-snapshot.db")
+    rc = admin.main(["backup", "--out", out])
+    assert rc == 0
+    assert os.path.exists(out)
+    assert "backup:" in capsys.readouterr().out
