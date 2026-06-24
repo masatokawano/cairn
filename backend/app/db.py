@@ -512,6 +512,87 @@ def stats() -> dict:
     return {"sources": [dict(r) for r in rows]}
 
 
+def iter_export_conversations(
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    conversation_id: int | None = None,
+):
+    """Yield conversations (same shape as get_conversation()) matching the
+    filters, ordered by updated_at. The shared filter/fetch layer behind
+    export_jsonl — P1-G's Markdown export will reuse it. Filters compose
+    with AND. `after` / `before` compare against updated_at as ISO8601
+    strings (lexical comparison works for normalized ISO timestamps).
+    """
+    conn = connect()
+    conds, params = [], []
+    if source:
+        conds.append("source = ?")
+        params.append(source)
+    if after:
+        conds.append("updated_at >= ?")
+        params.append(after)
+    if before:
+        conds.append("updated_at <= ?")
+        params.append(before)
+    if conversation_id is not None:
+        conds.append("id = ?")
+        params.append(conversation_id)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    ids = conn.execute(
+        f"SELECT id FROM conversations {where} ORDER BY updated_at",
+        params,
+    ).fetchall()
+    for row in ids:
+        conv = get_conversation(row["id"])
+        if conv:
+            yield conv
+
+
+def export_jsonl(
+    out,
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    conversation_id: int | None = None,
+) -> int:
+    """Write filtered conversations to `out` as JSONL (one object per line).
+    Returns the number of conversations written. Streams one conversation at
+    a time so large archives do not need to fit in memory.
+
+    Output shape: `{schema, kind, source, source_id, title, created_at,
+    updated_at, meta, messages, derived}`. `derived` is reserved for future
+    Cairn-computed fields (embeddings, segments, ...) so readers can tell
+    original-from-source data apart from extensions.
+    """
+    n = 0
+    for conv in iter_export_conversations(source, after, before, conversation_id):
+        record = {
+            "schema": "cairn.export.v1",
+            "kind": "conversation",
+            "source": conv["source"],
+            "source_id": conv["source_id"],
+            "title": conv["title"],
+            "created_at": conv["created_at"],
+            "updated_at": conv["updated_at"],
+            "meta": conv["meta"],
+            "messages": [
+                {
+                    "idx": m["idx"],
+                    "role": m["role"],
+                    "text": m["text"],
+                    "created_at": m["created_at"],
+                    "source_message_id": m["source_message_id"],
+                }
+                for m in conv["messages"]
+            ],
+            "derived": {},
+        }
+        out.write(json.dumps(record, ensure_ascii=False) + "\n")
+        n += 1
+    return n
+
+
 def backup(out_path: str | None = None) -> str:
     """Create a consistent single-file copy of the DB and return its path.
 

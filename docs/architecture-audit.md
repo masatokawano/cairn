@@ -6,6 +6,7 @@ ROADMAP.md「Task 1: 現状監査と Phase 1 設計」の成果物。コード�
 - 監査日: 2026-06-22
 - 対象コミット: `1c17738`（main）
 - ベースライン: `backend/.venv/bin/python -m pytest tests/ -q` → **53 passed**
+  （P1-A〜F 後は **83 passed**）
 - frontend build: 未実行（このタスクはコード変更なし）
 
 > 注: Codex の引き継ぎプロンプト（`CODEX_PROMPT_FOR_CLAUDE_CODE.md`）の優先項目
@@ -199,13 +200,26 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **リスク**: 低。
 - **依存**: なし。
 
-### P1-F. export JSONL（admin CLI / API）
-- **やること**: conversation/message/metadata を機械可読 JSONL 出力。
-  source / date range / conversation ID で絞り込み。原本と派生データを区別
-  （現状派生は無いので将来拡張に備えた構造）。
-- **受入基準**: 出力から会話本文・日時・source を再構成できる / フィルタが効く。
-- **リスク**: 低〜中（大量データのストリーミング出力に注意。limit/段階出力）。
+### P1-F. export JSONL（admin CLI）— ✅ 実装済み（2026-06-24）
+- **現状**: 完了。`db.iter_export_conversations()`（source / after / before /
+  conversation_id でフィルタする共通取得層、`get_conversation` 形と同形を yield、
+  P1-G で再利用）と `db.export_jsonl(out, ...)`（1 行 1 会話を逐次書き出し、戻り値は
+  件数）を追加。出力スキーマは `{schema: "cairn.export.v1", kind: "conversation",
+  source, source_id, title, created_at, updated_at, meta, messages[], derived: {}}`
+  ＝ `derived` を将来の Cairn 派生フィールド（embeddings / segments 等）の予約席に
+  することで原本と派生を区別。`python -m app.admin export-jsonl [--out PATH]
+  [--source S] [--after ISO] [--before ISO] [--conversation-id N]`、`--out` 省略時は
+  stdout＋status を stderr に出してパイプ安全。`--out` ファイルは 0600（平文を含む）。
+  `tests/test_export.py`（7件）。
+- **受入基準（達成）**: 出力から source / source_id / title / created_at /
+  updated_at / messages（role/text/created_at/source_message_id）が再構成可 /
+  source / 日付範囲（after,before）/ conversation_id フィルタが効く / JSONL が
+  1 行 1 オブジェクトでパース可 / admin CLI から実行可 / backend test 83 passed。
+- **リスク**: 低（読み取りのみ。会話単位でストリーム書き出しのため大量データも
+  メモリ消費が一定）。
 - **依存**: なし。
+- **残課題**: API 経由の export は未実装（admin CLI で受入基準を満たすため
+  必要時に追加）。Web UI への露出も同様。
 
 ### P1-G. export Markdown（admin CLI / API）
 - **やること**: スレッド単位の人間可読 Markdown 出力。フィルタは P1-F と共通化。
@@ -270,7 +284,7 @@ P1-H (attachment)  ← 実データ調査を伴うため後半
 | migration 後も既存データを検索・表示できる | ✅ P1-A 実装済み（test_migrations） | P1-A |
 | import 履歴（counts/warning/source）を確認できる | ✅ P1-B 実装済み（import_runs） | P1-B |
 | backup → 別 DB として復元できる | ✅ P1-E 実装済み（test_backup） | P1-E |
-| JSONL/Markdown export | ❌ | P1-F / P1-G |
+| JSONL/Markdown export | ▲ JSONL は P1-F 実装済み（test_export）。Markdown は未 | P1-F / P1-G |
 | 破損行・未知フィールドでも可能範囲を取り込み warning | ✅ | （実装済み・維持） |
 | backend test 全通過 | ✅ 53 passed | （各タスクで維持） |
 | UI 変更あれば frontend build 通過 | n/a（本タスクは UI 変更なし） | — |

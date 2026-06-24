@@ -13,6 +13,10 @@ Commands:
   backup         Write a consistent single-file copy of the DB (contains
                  plaintext; locked to 0600). Restore by copying it back or
                  pointing CAIRN_DB at it.
+  export-jsonl   Stream conversations as JSONL (machine-readable) with
+                 source / date-range / conversation_id filters. Writes to
+                 --out (0600) or stdout (status line on stderr so the
+                 output stays pipe-clean).
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -21,6 +25,9 @@ Usage:
   .venv/bin/python -m app.admin import-runs [--limit N] [--source S]
   .venv/bin/python -m app.admin integrity-check
   .venv/bin/python -m app.admin backup [--out PATH]
+  .venv/bin/python -m app.admin export-jsonl [--out PATH] [--source S]
+                                             [--after ISO] [--before ISO]
+                                             [--conversation-id N]
 """
 from __future__ import annotations
 
@@ -199,6 +206,27 @@ def cmd_backup(args) -> int:
     return 0
 
 
+def cmd_export_jsonl(args) -> int:
+    filters = dict(
+        source=args.source, after=args.after, before=args.before,
+        conversation_id=args.conversation_id,
+    )
+    if args.out:
+        out_path = os.path.abspath(args.out)
+        with open(out_path, "w", encoding="utf-8") as f:
+            n = db.export_jsonl(f, **filters)
+        try:
+            os.chmod(out_path, 0o600)  # contains plaintext conversation data
+        except OSError:
+            pass
+        print(f"exported {n} conversations → {out_path}", file=sys.stderr)
+    else:
+        # JSONL on stdout, status on stderr — so the output can be piped/redirected.
+        n = db.export_jsonl(sys.stdout, **filters)
+        print(f"exported {n} conversations", file=sys.stderr)
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -215,6 +243,14 @@ def main(argv=None) -> int:
     p_backup = sub.add_parser("backup")
     p_backup.add_argument("--out", default=None, help="destination path (default: <db>.backup-<timestamp>)")
     p_backup.set_defaults(func=cmd_backup)
+    p_export = sub.add_parser("export-jsonl")
+    p_export.add_argument("--out", default=None, help="destination path (default: stdout)")
+    p_export.add_argument("--source", default=None, help="filter: chatgpt | claude | claude_cli | codex_cli | gemini")
+    p_export.add_argument("--after", default=None, help="updated_at >= ISO8601 (inclusive)")
+    p_export.add_argument("--before", default=None, help="updated_at <= ISO8601 (inclusive)")
+    p_export.add_argument("--conversation-id", type=int, default=None, dest="conversation_id",
+                          help="export only this conversation (DB rowid)")
+    p_export.set_defaults(func=cmd_export_jsonl)
     args = parser.parse_args(argv)
     return args.func(args)
 
