@@ -593,6 +593,45 @@ def export_jsonl(
     return n
 
 
+def export_markdown(
+    out,
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    conversation_id: int | None = None,
+) -> int:
+    """Write filtered conversations to `out` as human-readable Markdown.
+    Returns the number of conversations written. Shares the filter layer with
+    export_jsonl (iter_export_conversations), so flags behave identically.
+
+    Per-conversation layout: `# title` + a bullet list of source / source_id /
+    created_at / updated_at, then each message as `## role — timestamp` with
+    the body preserved verbatim. Multiple conversations are separated by a
+    horizontal rule so the stream can be split (e.g. for Obsidian).
+    """
+    n = 0
+    for conv in iter_export_conversations(source, after, before, conversation_id):
+        if n > 0:
+            out.write("\n---\n\n")
+        out.write(f"# {conv['title']}\n\n")
+        out.write(f"- source: {conv['source']}\n")
+        out.write(f"- source_id: {conv['source_id']}\n")
+        if conv["created_at"]:
+            out.write(f"- created_at: {conv['created_at']}\n")
+        if conv["updated_at"]:
+            out.write(f"- updated_at: {conv['updated_at']}\n")
+        out.write("\n")
+        for m in conv["messages"]:
+            header = f"## {m['role']}"
+            if m["created_at"]:
+                header += f" — {m['created_at']}"
+            out.write(f"{header}\n\n")
+            out.write(m["text"].rstrip())
+            out.write("\n\n")
+        n += 1
+    return n
+
+
 def backup(out_path: str | None = None) -> str:
     """Create a consistent single-file copy of the DB and return its path.
 

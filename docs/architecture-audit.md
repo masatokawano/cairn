@@ -6,7 +6,7 @@ ROADMAP.md「Task 1: 現状監査と Phase 1 設計」の成果物。コード�
 - 監査日: 2026-06-22
 - 対象コミット: `1c17738`（main）
 - ベースライン: `backend/.venv/bin/python -m pytest tests/ -q` → **53 passed**
-  （P1-A〜F 後は **83 passed**）
+  （P1-A〜G 後は **88 passed**）
 - frontend build: 未実行（このタスクはコード変更なし）
 
 > 注: Codex の引き継ぎプロンプト（`CODEX_PROMPT_FOR_CLAUDE_CODE.md`）の優先項目
@@ -221,11 +221,22 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **残課題**: API 経由の export は未実装（admin CLI で受入基準を満たすため
   必要時に追加）。Web UI への露出も同様。
 
-### P1-G. export Markdown（admin CLI / API）
-- **やること**: スレッド単位の人間可読 Markdown 出力。フィルタは P1-F と共通化。
-- **受入基準**: 1 会話が読みやすい Markdown になり、source/日時が確認できる。
-- **リスク**: 低。
-- **依存**: P1-F（フィルタ・取得層を共有）。
+### P1-G. export Markdown（admin CLI）— ✅ 実装済み（2026-06-24）
+- **現状**: 完了。`db.export_markdown(out, ...)` を追加し、P1-F の
+  `iter_export_conversations` を再利用（同じ source / after / before /
+  conversation_id フィルタが効く）。レイアウトは 1 会話 = `# title` + `- source` /
+  `- source_id` / `- created_at` / `- updated_at` のメタ + 各メッセージ
+  `## role — created_at` + 本文（verbatim）。複数会話は `\n---\n` で区切るので
+  ストリームを後から分割可（Obsidian 取り込み等）。admin は
+  `python -m app.admin export-markdown [--out PATH] [--source S] [--after ISO]
+  [--before ISO] [--conversation-id N]`。`--out`/stdout・status を stderr に
+  分離する挙動は P1-F と共通化（`_run_export` ヘルパ）。`--out` は 0600。
+  `tests/test_export_markdown.py`（5件）。
+- **受入基準（達成）**: 1 会話が読みやすい Markdown になり source/日時が確認できる /
+  複数会話は `---` で区切られる / 共通フィルタ層がそのまま効く / admin CLI 実行可 /
+  backend test 88 passed。
+- **リスク**: 低（読み取り＋テキスト整形のみ）。
+- **依存**: P1-F（共通フィルタ・取得層）。
 
 ### P1-H. attachment metadata
 - **やること**: `attachments` テーブル（conversation_id/message_id, source_path,
@@ -284,7 +295,7 @@ P1-H (attachment)  ← 実データ調査を伴うため後半
 | migration 後も既存データを検索・表示できる | ✅ P1-A 実装済み（test_migrations） | P1-A |
 | import 履歴（counts/warning/source）を確認できる | ✅ P1-B 実装済み（import_runs） | P1-B |
 | backup → 別 DB として復元できる | ✅ P1-E 実装済み（test_backup） | P1-E |
-| JSONL/Markdown export | ▲ JSONL は P1-F 実装済み（test_export）。Markdown は未 | P1-F / P1-G |
+| JSONL/Markdown export | ✅ JSONL は P1-F、Markdown は P1-G 実装済み | P1-F / P1-G |
 | 破損行・未知フィールドでも可能範囲を取り込み warning | ✅ | （実装済み・維持） |
 | backend test 全通過 | ✅ 53 passed | （各タスクで維持） |
 | UI 変更あれば frontend build 通過 | n/a（本タスクは UI 変更なし） | — |

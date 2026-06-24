@@ -17,6 +17,9 @@ Commands:
                  source / date-range / conversation_id filters. Writes to
                  --out (0600) or stdout (status line on stderr so the
                  output stays pipe-clean).
+  export-markdown  Same filters as export-jsonl but renders human-readable
+                 Markdown (one `# title` section per conversation, role
+                 headings, `---` between conversations).
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -28,6 +31,9 @@ Usage:
   .venv/bin/python -m app.admin export-jsonl [--out PATH] [--source S]
                                              [--after ISO] [--before ISO]
                                              [--conversation-id N]
+  .venv/bin/python -m app.admin export-markdown [--out PATH] [--source S]
+                                                 [--after ISO] [--before ISO]
+                                                 [--conversation-id N]
 """
 from __future__ import annotations
 
@@ -206,7 +212,9 @@ def cmd_backup(args) -> int:
     return 0
 
 
-def cmd_export_jsonl(args) -> int:
+def _run_export(writer, args) -> int:
+    """Drive the shared export path: --out file (0600) or stdout, with the
+    status line always on stderr so the artifact stays pipe-clean."""
     filters = dict(
         source=args.source, after=args.after, before=args.before,
         conversation_id=args.conversation_id,
@@ -214,17 +222,24 @@ def cmd_export_jsonl(args) -> int:
     if args.out:
         out_path = os.path.abspath(args.out)
         with open(out_path, "w", encoding="utf-8") as f:
-            n = db.export_jsonl(f, **filters)
+            n = writer(f, **filters)
         try:
             os.chmod(out_path, 0o600)  # contains plaintext conversation data
         except OSError:
             pass
         print(f"exported {n} conversations → {out_path}", file=sys.stderr)
     else:
-        # JSONL on stdout, status on stderr — so the output can be piped/redirected.
-        n = db.export_jsonl(sys.stdout, **filters)
+        n = writer(sys.stdout, **filters)
         print(f"exported {n} conversations", file=sys.stderr)
     return 0
+
+
+def cmd_export_jsonl(args) -> int:
+    return _run_export(db.export_jsonl, args)
+
+
+def cmd_export_markdown(args) -> int:
+    return _run_export(db.export_markdown, args)
 
 
 def main(argv=None) -> int:
@@ -243,14 +258,19 @@ def main(argv=None) -> int:
     p_backup = sub.add_parser("backup")
     p_backup.add_argument("--out", default=None, help="destination path (default: <db>.backup-<timestamp>)")
     p_backup.set_defaults(func=cmd_backup)
+    def _add_export_filters(sp):
+        sp.add_argument("--out", default=None, help="destination path (default: stdout)")
+        sp.add_argument("--source", default=None, help="filter: chatgpt | claude | claude_cli | codex_cli | gemini")
+        sp.add_argument("--after", default=None, help="updated_at >= ISO8601 (inclusive)")
+        sp.add_argument("--before", default=None, help="updated_at <= ISO8601 (inclusive)")
+        sp.add_argument("--conversation-id", type=int, default=None, dest="conversation_id",
+                        help="export only this conversation (DB rowid)")
     p_export = sub.add_parser("export-jsonl")
-    p_export.add_argument("--out", default=None, help="destination path (default: stdout)")
-    p_export.add_argument("--source", default=None, help="filter: chatgpt | claude | claude_cli | codex_cli | gemini")
-    p_export.add_argument("--after", default=None, help="updated_at >= ISO8601 (inclusive)")
-    p_export.add_argument("--before", default=None, help="updated_at <= ISO8601 (inclusive)")
-    p_export.add_argument("--conversation-id", type=int, default=None, dest="conversation_id",
-                          help="export only this conversation (DB rowid)")
+    _add_export_filters(p_export)
     p_export.set_defaults(func=cmd_export_jsonl)
+    p_md = sub.add_parser("export-markdown")
+    _add_export_filters(p_md)
+    p_md.set_defaults(func=cmd_export_markdown)
     args = parser.parse_args(argv)
     return args.func(args)
 
