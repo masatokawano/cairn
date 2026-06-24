@@ -69,6 +69,25 @@ CREATE TABLE IF NOT EXISTS ingest_files (
     size INTEGER NOT NULL
 );
 
+-- Attachment metadata (P1-H). Cairn stores metadata only; the bytes
+-- themselves are not kept (avoids ballooning the DB and keeps redaction's
+-- scope to text). hash = sha256 of the decoded bytes, so dedup / change
+-- detection is by content. message_id is nullable to allow conversation-
+-- level attachments in the future; conversation_id is required.
+-- extracted_text is reserved for future OCR / PDF text extraction.
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    source_ref TEXT,
+    mime TEXT,
+    size INTEGER,
+    hash TEXT,
+    extracted_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_conv ON attachments(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
+
 -- Import history (P1-B): one row per ingest of a single input (an uploaded
 -- file, or one CLI log file). Records counts, warnings, parser version, and
 -- the input's content hash for auditability.
@@ -131,10 +150,26 @@ _MIGRATION_3_MSG_SOURCE_ID = (
     "ALTER TABLE messages ADD COLUMN source_message_id TEXT;"
 )
 
-_SCHEMA_VERSION = 3
+_MIGRATION_4_ATTACHMENTS = """
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    source_ref TEXT,
+    mime TEXT,
+    size INTEGER,
+    hash TEXT,
+    extracted_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_conv ON attachments(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
+"""
+
+_SCHEMA_VERSION = 4
 _MIGRATIONS: list[tuple[int, str]] = [
     (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
     (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
+    (4, _MIGRATION_4_ATTACHMENTS),       # add attachments table to pre-v4 DBs
 ]
 
 
@@ -264,12 +299,29 @@ def upsert_conversations(parsed_list) -> dict:
                 )
                 conv_id = cur.lastrowid
                 stats["inserted"] += 1
-            conn.executemany(
-                "INSERT INTO messages (conversation_id, idx, role, text, created_at, source_message_id)"
-                " VALUES (?,?,?,?,?,?)",
-                [(conv_id, i, m.role, m.text, m.created_at, m.source_message_id)
-                 for i, m in enumerate(pc.messages)],
-            )
+            # messages are re-inserted on every update; attachments hang off
+            # message_id via FK CASCADE, so the previous attachments were
+            # already wiped when the messages were deleted above.
+            msg_ids: list[int] = []
+            for i, m in enumerate(pc.messages):
+                cur = conn.execute(
+                    "INSERT INTO messages (conversation_id, idx, role, text, created_at, source_message_id)"
+                    " VALUES (?,?,?,?,?,?)",
+                    (conv_id, i, m.role, m.text, m.created_at, m.source_message_id),
+                )
+                msg_ids.append(cur.lastrowid)
+            attachment_rows = [
+                (conv_id, msg_ids[i], a.source_ref, a.mime, a.size, a.hash, a.extracted_text)
+                for i, m in enumerate(pc.messages)
+                for a in m.attachments
+            ]
+            if attachment_rows:
+                conn.executemany(
+                    "INSERT INTO attachments"
+                    " (conversation_id, message_id, source_ref, mime, size, hash, extracted_text)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    attachment_rows,
+                )
     return stats
 
 
@@ -464,6 +516,18 @@ def get_conversation(conv_id: int) -> dict | None:
         " FROM messages WHERE conversation_id=? ORDER BY idx",
         (conv_id,),
     ).fetchall()
+    atts = conn.execute(
+        "SELECT message_id, source_ref, mime, size, hash, extracted_text"
+        " FROM attachments WHERE conversation_id=? ORDER BY id",
+        (conv_id,),
+    ).fetchall()
+    atts_by_msg: dict[int, list[dict]] = {}
+    for a in atts:
+        atts_by_msg.setdefault(a["message_id"], []).append({
+            "source_ref": a["source_ref"], "mime": a["mime"],
+            "size": a["size"], "hash": a["hash"],
+            "extracted_text": a["extracted_text"],
+        })
     return {
         "id": conv["id"],
         "source": conv["source"],
@@ -472,7 +536,10 @@ def get_conversation(conv_id: int) -> dict | None:
         "created_at": conv["created_at"],
         "updated_at": conv["updated_at"],
         "meta": json.loads(conv["meta"]),
-        "messages": [dict(m) for m in msgs],
+        "messages": [
+            {**dict(m), "attachments": atts_by_msg.get(m["id"], [])}
+            for m in msgs
+        ],
     }
 
 

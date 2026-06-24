@@ -17,11 +17,27 @@ PARSER_VERSION = "1"
 
 
 @dataclass
+class ParsedAttachment:
+    """File attached to a message (P1-H). Metadata only — Cairn does not
+    store the bytes. `hash` is sha256 of the raw decoded bytes (so the same
+    file referenced twice dedups by hash, and an in-place edit is detected
+    by the diff importer). `source_ref` is None for inline-embedded (base64)
+    attachments since there is no path to point at; `extracted_text` is
+    reserved for future OCR / PDF text extraction passes."""
+    source_ref: str | None = None
+    mime: str | None = None
+    size: int | None = None
+    hash: str | None = None
+    extracted_text: str | None = None
+
+
+@dataclass
 class ParsedMessage:
     role: str  # "user" | "assistant" | "system" | "tool"
     text: str
     created_at: str | None = None  # ISO8601 string (UTC) or None
     source_message_id: str | None = None
+    attachments: list[ParsedAttachment] = field(default_factory=list)
 
 
 @dataclass
@@ -35,11 +51,19 @@ class ParsedConversation:
     meta: dict = field(default_factory=dict)
 
     def content_hash(self) -> str:
-        """Stable hash of the conversation content, used for diff imports."""
-        payload = json.dumps(
-            [(m.role, m.text, m.created_at) for m in self.messages],
-            ensure_ascii=False,
-        )
+        """Stable hash of the conversation content, used for diff imports.
+
+        Attachments contribute to the hash ONLY when present, so messages
+        without attachments produce the same hash as before P1-H — existing
+        conversations don't all re-update on next sync.
+        """
+        items: list = []
+        for m in self.messages:
+            entry: list = [m.role, m.text, m.created_at]
+            if m.attachments:
+                entry.append([a.hash for a in m.attachments])
+            items.append(entry)
+        payload = json.dumps(items, ensure_ascii=False)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

@@ -6,7 +6,7 @@ ROADMAP.md「Task 1: 現状監査と Phase 1 設計」の成果物。コード�
 - 監査日: 2026-06-22
 - 対象コミット: `1c17738`（main）
 - ベースライン: `backend/.venv/bin/python -m pytest tests/ -q` → **53 passed**
-  （P1-A〜G 後は **88 passed**）
+  （P1-A〜H 後は **96 passed**）
 - frontend build: 未実行（このタスクはコード変更なし）
 
 > 注: Codex の引き継ぎプロンプト（`CODEX_PROMPT_FOR_CLAUDE_CODE.md`）の優先項目
@@ -238,15 +238,36 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **リスク**: 低（読み取り＋テキスト整形のみ）。
 - **依存**: P1-F（共通フィルタ・取得層）。
 
-### P1-H. attachment metadata
-- **やること**: `attachments` テーブル（conversation_id/message_id, source_path,
-  mime, size, hash, extracted_text 別管理用フィールド）。パーサーが添付メタを拾えるものは
-  関連付け、無くても本文取り込みは失敗させない。
-- **受入基準**: 添付メタが会話/メッセージに紐づく / 添付欠損でも会話は取り込める /
-  将来の OCR/PDF 抽出用に派生テキストを別管理できる構造。
-- **リスク**: 中（各パーサーの添付表現が source ごとに異なる。CLI ログは
-  添付参照が乏しく、まず schema + チャット系から）。
-- **依存**: P1-A。実データ調査が前提（NOTES.md の方針通り）。
+### P1-H. attachment metadata — ✅ 実装済み（2026-06-24）
+- **現状**: 完了。実データ調査で `~/.claude/projects/**/*.jsonl` の `type:"attachment"`
+  行は **tool/hook メタデータであってファイル添付ではなく**、実添付は user/assistant の
+  `message.content` 内 `{type:"document", source:{type:"base64", media_type, data}}`
+  として現れることを確認（PDF を実データで確認、NOTES.md に記録）。
+  - `attachments` テーブル（`conversation_id` FK CASCADE, `message_id` FK CASCADE、
+    `source_ref` / `mime` / `size` / `hash` / `extracted_text`）を `_SCHEMA` に追加 +
+    migration v4（`_MIGRATION_4_ATTACHMENTS`、`_SCHEMA_VERSION=4`）。
+  - `parsers/base.py` に `ParsedAttachment` + `ParsedMessage.attachments`。
+    `content_hash` は **attachments が空の message では従来と同じ JSON 形を維持**
+    （既存会話の一斉 update を回避）、空でない時のみ `[hash, ...]` を 4 項目目に追加。
+  - `upsert_conversations` は messages 全削除→再挿入時に attachments を FK CASCADE で
+    自動消去、再挿入時にバルク INSERT。`get_conversation` は attachments を message に
+    紐づけて返す。
+  - `claude_cli.py` の `_block_attachments` が `document` / `image` ブロックを抽出
+    （base64 はデコードして sha256 + size を記録、bytes 自体は保持しない；URL 参照は
+    source_ref のみ）。本文 text と attachments のどちらかがあればメッセージとして採用
+    （添付のみのターンも保持）。
+  - バイナリ本体は保存しない方針（redact-apply の責務範囲を text に限定、ストレージ
+    爆発回避）。`extracted_text` は将来の OCR/PDF 抽出パスのための予約席。
+- **受入基準（達成）**: attachments が conversation/message に紐づく / 添付欠損でも
+  会話は取り込める（既存テスト 88 件＋他ソースは additive 互換）/ derived-text 用に
+  `extracted_text` 列を別管理 / FK CASCADE で orphan attachment が出ない（integrity_check
+  の orphan_attachments 検査が v4 で有効化）/ backend test 96 passed。
+- **リスク**: 中 → 低（実装後）。CLI 以外の実データ（chatgpt/claude_export/gemini 実
+  エクスポート）はまだ未検証で、それらの parser は additive 互換のまま手付かず。
+- **依存**: P1-A（migration runner）。
+- **残課題**: chatgpt/claude_export/gemini の実エクスポートでの添付表現は未検証
+  （NOTES.md の既知の限界）。bytes 自体の保存（attached blob store）と OCR/PDF 抽出は
+  別タスク（Phase 1 のスコープ外）。
 
 ---
 

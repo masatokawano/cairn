@@ -4,16 +4,24 @@ Each file is one session. Relevant lines have type "user" or "assistant"
 with a `message` object; everything else (mode, file-history-snapshot,
 attachment, ...) is noise. Notes:
 - isSidechain=true lines are subagent traffic — skipped.
-- message.content is either a string or a list of blocks; only "text"
-  blocks are imported (thinking / tool_use / tool_result are skipped).
+- message.content is either a string or a list of blocks; "text" blocks are
+  imported as message text, "document" blocks become attachments (mime/
+  size/hash from the decoded bytes; bytes themselves NOT stored).
+  thinking / tool_use / tool_result are skipped.
 - A "summary" line, when present, provides a human-readable title.
 - cwd identifies the project; stored in meta.
+
+Note: the `type:"attachment"` ROW kind in these logs is NOT a file
+attachment — it carries tool/hook metadata (allowedTools, MCP servers,
+skill counts, ...). Real file attachments live inside message.content.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 
-from .base import ParseResult, ParsedConversation, ParsedMessage, make_title
+from .base import ParseResult, ParsedAttachment, ParsedConversation, ParsedMessage, make_title
 
 SOURCE = "claude_cli"
 
@@ -30,6 +38,37 @@ def _block_text(content) -> str:
                     chunks.append(t.strip())
         return "\n".join(chunks)
     return ""
+
+
+def _block_attachments(content) -> list[ParsedAttachment]:
+    """Extract document/image blocks as ParsedAttachment (metadata only —
+    the decoded bytes are hashed and counted, then discarded)."""
+    if not isinstance(content, list):
+        return []
+    out: list[ParsedAttachment] = []
+    for b in content:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") not in ("document", "image"):
+            continue
+        src = b.get("source") or {}
+        if src.get("type") == "base64" and isinstance(src.get("data"), str):
+            try:
+                raw = base64.b64decode(src["data"], validate=False)
+            except (ValueError, TypeError):
+                continue  # malformed → skip without raising
+            out.append(ParsedAttachment(
+                source_ref=None,  # inline-embedded; no path
+                mime=src.get("media_type"),
+                size=len(raw),
+                hash=hashlib.sha256(raw).hexdigest(),
+            ))
+        elif isinstance(src.get("url"), str):
+            # url-referenced attachments: record the ref, no hash without the bytes
+            out.append(ParsedAttachment(
+                source_ref=src["url"], mime=src.get("media_type"),
+            ))
+    return out
 
 
 def _is_noise_user_text(text: str) -> bool:
@@ -77,10 +116,15 @@ def parse_file(path: str, content: str) -> ParseResult:
         msg = rec.get("message")
         if not isinstance(msg, dict):
             continue
-        text = _block_text(msg.get("content"))
-        if not text:
+        content = msg.get("content")
+        text = _block_text(content)
+        attachments = _block_attachments(content)
+        # Keep messages that have either text OR attachments — an
+        # attachment-only message (e.g. a user pasting just a PDF) is a real
+        # turn in the conversation.
+        if not text and not attachments:
             continue
-        if rtype == "user" and _is_noise_user_text(text):
+        if rtype == "user" and text and _is_noise_user_text(text):
             continue
         session_id = session_id or rec.get("sessionId")
         cwd = cwd or rec.get("cwd")
@@ -93,6 +137,7 @@ def parse_file(path: str, content: str) -> ParseResult:
                 text=text,
                 created_at=ts,
                 source_message_id=rec.get("uuid"),
+                attachments=attachments,
             )
         )
 

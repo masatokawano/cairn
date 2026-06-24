@@ -98,8 +98,8 @@ def test_migration_adds_source_message_id_to_pre_v3_db(db):
     conn.close()
     db._local.conn = None
 
-    conn = db.connect()  # reopen → migration v3 runs
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    conn = db.connect()  # reopen → all pending migrations (>=v3) run
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)")]
     assert "source_message_id" in cols
     # existing data still intact

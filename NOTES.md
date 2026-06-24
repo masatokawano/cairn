@@ -92,6 +92,28 @@
 - MCPブラウザ(Docker内)から動作確認するときは `host.docker.internal` を使い、
   サーバーを一時的に `--host 0.0.0.0` で起動する必要がある（通常は127.0.0.1）。
 
+## 添付 (P1-H / 各 source 実調査メモ)
+
+- **claude_cli**: `type:"attachment"` という**行は罠**。中身は tool/hook メタデータ
+  （allowedTools、MCP、skillCount、commands、stdout/stderr 等）でファイル添付ではない。
+  → 実際の添付は user/assistant の `message.content` ブロック内に
+  `{type:"document", source:{type:"base64", media_type, data}}` として現れる。
+  実データで `application/pdf` を確認（base64 数十〜百KB）。`image` ブロックも
+  同じ source 形（type:"base64" or "url"）の前提でパース。
+- **codex_cli**: content は `input_text` / `output_text` のみ。添付なし。
+- **chatgpt / claude_export / gemini**: 現状 fixture には添付ブロックなし。実エクスポート
+  での挙動は未検証。
+- **バイナリ本体は保存しない**方針（attachments は metadata only: source_ref / mime /
+  size / hash / extracted_text）。redact-apply の責務を text に限定し、ストレージ爆発も回避。
+  ハッシュは base64 デコード後の生バイトの sha256。
+- **`content_hash` の後方互換**: attachments を空のとき content_hash は P1-H 以前と同じ
+  JSON 形を維持（`[role, text, created_at]`）、添付があるときだけ 4 項目目に `[hash...]`
+  を append。これで「P1-H 以前に取り込んだ会話が再 sync で一斉に updated 扱いになる」
+  事故を回避（test_idempotency / test_attachments で固定）。
+- **FK CASCADE**: attachments は `(conversation_id, message_id)` 双方に ON DELETE
+  CASCADE。upsert_conversations は更新時に messages を全削除→再挿入するため、
+  attachments も自動で消えて再投入される（orphan 0 を integrity_check で確認）。
+
 ## スキーマ migration（P1-A / `db.py`）
 
 - バージョンは `PRAGMA user_version`。2つの仕組みを併用する:
