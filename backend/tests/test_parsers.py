@@ -115,13 +115,79 @@ def test_gemini_parse():
     data = json.loads(load("gemini_sample.json"))
     assert gemini.looks_like(data)
     result = gemini.parse(data)
-    assert len(result.conversations) == 2  # Maps record excluded
+    # 4 records → 2 conversations: Maps excluded, "フィードバック" excluded
+    assert len(result.conversations) == 2
     first, second = result.conversations
+
+    # Weather Q with an HTML response (safeHtmlItem is now used).
     assert first.messages[0].text == "東京の明日の天気を教えて"
-    assert len(first.messages) == 1  # no response in record
-    assert len(second.messages) == 2  # subtitles treated as response
-    assert second.messages[1].role == "assistant"
+    assert len(first.messages) == 2
+    assert first.messages[1].role == "assistant"
+    assert "晴れ時々曇り" in first.messages[1].text
+    assert "22°C" in first.messages[1].text  # block tags became newlines
+    assert first.messages[0].attachments == []
+    assert first.messages[1].attachments == []
+
+    # Image-input + generated-image Q.
+    assert second.messages[0].text == "この画像の問題を解いて"
+    user_atts = second.messages[0].attachments
+    asst_atts = second.messages[1].attachments
+    # user: IMG_1245 (from subtitles + imageFile + attachedFiles, deduped).
+    # assistant: answer-gen.png (only the <img> in safeHtmlItem).
+    assert [a.source_ref for a in user_atts] == ["IMG_1245-abc.jpeg"]
+    assert [a.source_ref for a in asst_atts] == ["answer-gen.png"]
+    # No bytes passed in this test → hash/size stay None, mime is best-effort.
+    assert user_atts[0].mime == "image/jpeg"
+    assert asst_atts[0].mime == "image/png"
+    assert user_atts[0].hash is None and user_atts[0].size is None
+    assert "3π cm²" in second.messages[1].text
+
     assert any("Maps" in w for w in result.warnings)
+
+
+def test_gemini_attachments_hashed_when_zip_provided():
+    """When parse() receives the surrounding ZIP's bytes, image attachments
+    get sha256 + size; without it they record only source_ref."""
+    import hashlib as _h
+
+    data = json.loads(load("gemini_sample.json"))
+    img_bytes = b"\x89PNG\r\n\x1a\n" + b"fake png body" * 32
+    jpg_bytes = b"\xff\xd8\xff\xe0" + b"fake jpg body" * 16
+    attachments_map = {
+        "Takeout/My Activity/Gemini Apps/IMG_1245-abc.jpeg": jpg_bytes,
+        "Takeout/My Activity/Gemini Apps/answer-gen.png": img_bytes,
+    }
+    result = gemini.parse(data, attachments=attachments_map)
+    second = result.conversations[1]
+    user_att = second.messages[0].attachments[0]
+    asst_att = second.messages[1].attachments[0]
+    assert user_att.size == len(jpg_bytes)
+    assert user_att.hash == _h.sha256(jpg_bytes).hexdigest()
+    assert asst_att.size == len(img_bytes)
+    assert asst_att.hash == _h.sha256(img_bytes).hexdigest()
+
+
+def test_gemini_attachment_only_user_message_preserved():
+    """An attachment-only turn (no prompt text) is still kept."""
+    data = [{
+        "header": "Gemini アプリ",
+        "title": "送信したメッセージ: ",
+        "time": "2026-04-07T07:18:15.144Z",
+        "products": ["Gemini アプリ"],
+        "subtitles": [
+            {"name": "添付ファイル 1 件"},
+            {"name": "-  IMG.jpeg", "url": "IMG-xyz.jpeg"},
+        ],
+        "imageFile": "IMG-xyz.jpeg",
+        "attachedFiles": ["IMG-xyz.jpeg"],
+        "safeHtmlItem": [{"html": "<p>Answer</p>"}],
+    }]
+    result = gemini.parse(data)
+    assert len(result.conversations) == 1
+    conv = result.conversations[0]
+    assert conv.messages[0].text == ""
+    assert [a.source_ref for a in conv.messages[0].attachments] == ["IMG-xyz.jpeg"]
+    assert conv.messages[1].text == "Answer"
 
 
 def test_claude_cli_parse():

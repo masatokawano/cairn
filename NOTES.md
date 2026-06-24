@@ -91,11 +91,41 @@
   会話履歴は「マイ アクティビティ」→ Gemini Apps。
 - デフォルト出力はHTML。JSONを選ばないと取り込めない（ZIP内にHTMLしか
   なければその旨のエラーメッセージを出すようにしてある）。
-- スレッド構造なし。1レコード＝1会話として取り込む。応答は原則含まれない
-  （`subtitles` 等にあれば拾う）。
-- タイトルはロケール依存（"Prompted X" / 「X と入力しました」）。
-  プレフィックス除去はベストエフォート。
-- ※実エクスポートでの検証はまだ。実ファイル入手後に要調整。
+- スレッド構造なし。1レコード＝1会話として取り込む。
+- **実 Takeout で検証（2026-06-24）。当初のパーサーは subtitles を assistant 応答に
+  していたが、実データの subtitles は「添付ファイル N 件」「画像を N 枚生成しました」
+  などのメタ文＋添付説明であり応答ではなかった**。応答本文は `safeHtmlItem[0].html`
+  に HTML 形式で入っている（LaTeX は HTML 内テキストとして混ざる）。
+  パーサーは `safeHtmlItem` を HTML→text 変換して assistant message にする。
+  subtitles は **添付ファイル参照の抽出にのみ使う**。
+- タイトルはロケール依存。実 Takeout で見たプレフィックス: `"送信したメッセージ: "`
+  （新ロケール）、`"Prompted X"` / 「X と入力しました」（旧）。すべて除去対象。
+- `"フィードバックを送信しました: "` で始まるレコードは user feedback ログで
+  会話ではないので **除外**。
+- **添付参照は 3 系統**:
+  - `imageFile`: 単一ファイル名
+  - `attachedFiles[]`: ファイル名のリスト（user upload + assistant 生成画像 が混在）
+  - `subtitles[].url`: user upload を説明する `{name, url}` ブロック（url が
+    ファイル名）
+  - **assistant 生成画像は safeHtmlItem 内の `<img src="...">` で識別**。それ以外
+    （imageFile + attachedFiles + subtitles{url}）から assistant 候補を除いた残りが
+    user 添付。
+- **ZIP 同梱画像の hash 化**: parse_upload に `_collect_zip_attachments` を追加し、
+  gemini パーサーには `WANTS_ATTACHMENTS=True` フラグで「ZIP コンテキストが欲しい」
+  と宣言させる。`parse(data, attachments={filename: bytes})` で受け取り、各
+  添付の bytes を sha256 + size で記録（bytes 本体は保存しない）。他パーサーは
+  この引数を受け取らない（無視）。
+- **拡張子の癖**: subtitles の url が `.jpeg` で書かれているのに ZIP 内の実体は
+  `.jpg` というケースがある（Takeout が拡張子を変換することがある）。
+  `_make_attachment` は `.jpeg ↔ .jpg` swap でフォールバック検索する。
+- **`looks_like` は header キーで判定**するため、Takeout ZIP の「マイ アクティビティ」
+  以外の活動（Maps, Search 等）が同梱されていてもパーサー側で除外できるが、
+  parse_upload は最初に見つけた `.json` を試すので、ファイル名優先順位を
+  `conversations.json` > `MyActivity.json` > `Gemini` を含むパス > その他 にした
+  （ロケール依存の `マイアクティビティ.json` を拾うため）。
+- **既存 DB への影響**: 修正前後で Gemini 会話の messages 構造が変わるため
+  content_hash は必ず変わる。再 sync で全 Gemini 会話が "updated" 扱いになる
+  （修正前のデータがほぼ未完成だったので許容）。
 
 ## アーキテクチャのメモ
 
@@ -121,7 +151,11 @@
   message レベルの `attachments[]` / `files[]` に置かれる。`extracted_content` は
   `extracted_text` として保存し、hash は extracted_content のテキストハッシュ
   （bytes が無いため bytes hash と意味が異なる）。詳細は「Claude エクスポート」節参照。
-- **chatgpt / gemini**: 現状 fixture には添付ブロックなし。実エクスポートでの挙動は未検証。
+- **gemini**: 実 Takeout で検証（2026-06-24）。添付は `imageFile` / `attachedFiles[]` /
+  `subtitles[].url` の 3 系統。assistant 生成画像は `safeHtmlItem` 内の `<img src>` で
+  識別。ZIP 同梱の画像 bytes は parse_upload 経由で hash + size を取得（bytes 本体は
+  保存しない）。詳細は「Gemini」節参照。
+- **chatgpt**: 現状 fixture には添付ブロックなし。実エクスポートでの挙動は未検証。
 - **バイナリ本体は保存しない**方針（attachments は metadata only: source_ref / mime /
   size / hash / extracted_text）。redact-apply の責務を text に限定し、ストレージ爆発も回避。
   ハッシュは base64 デコード後の生バイトの sha256。

@@ -19,6 +19,9 @@ _CHAT_PARSERS = [chatgpt, claude_export, gemini]
 # DoS guards for uploaded archives (see SECURITY.md #2).
 MAX_JSON_BYTES = int(os.environ.get("CAIRN_MAX_JSON_MB", "500")) * 1024 * 1024
 MAX_ZIP_ENTRIES = int(os.environ.get("CAIRN_MAX_ZIP_ENTRIES", "10000"))
+# Per-attachment size when reading bytes from the surrounding ZIP for
+# parsers that opt in via WANTS_ATTACHMENTS (currently: gemini Takeout).
+MAX_ATTACHMENT_BYTES = int(os.environ.get("CAIRN_MAX_ATTACHMENT_MB", "50")) * 1024 * 1024
 
 
 class UnknownFormatError(Exception):
@@ -48,6 +51,31 @@ def _read_bounded(zf: zipfile.ZipFile, name: str) -> bytes:
     return data
 
 
+def _collect_zip_attachments(zf: zipfile.ZipFile, exclude: str) -> dict[str, bytes]:
+    """Read non-JSON entries of `zf` into memory keyed by their archive name.
+
+    Used by parsers that need to hash/size sibling files (currently gemini
+    Takeout's images). Skips JSON, macOS metadata, and oversized files."""
+    out: dict[str, bytes] = {}
+    for n in zf.namelist():
+        if (
+            n == exclude
+            or n.endswith(".json")
+            or n.startswith("__MACOSX")
+            or n.endswith("/")
+        ):
+            continue
+        info = zf.getinfo(n)
+        if info.file_size > MAX_ATTACHMENT_BYTES:
+            continue
+        with zf.open(n) as f:
+            buf = f.read(MAX_ATTACHMENT_BYTES + 1)
+        if len(buf) > MAX_ATTACHMENT_BYTES:
+            continue  # ZIP header lied; drop quietly
+        out[n] = buf
+    return out
+
+
 def _parse_zip(raw: bytes) -> ParseResult:
     with zipfile.ZipFile(io.BytesIO(raw)) as zf:
         names = zf.namelist()
@@ -61,18 +89,22 @@ def _parse_zip(raw: bytes) -> ParseResult:
         ]
         # Try likely files first: conversations.json (ChatGPT/Claude),
         # MyActivity.json (Gemini Takeout), then any remaining JSON.
-        candidates.sort(
-            key=lambda n: (
-                0 if n.endswith("conversations.json")
-                else 1 if n.endswith("MyActivity.json")
-                else 2
-            )
-        )
+        # Takeout's localised filename varies (e.g. "マイアクティビティ.json"),
+        # so also prefer anything under a "Gemini" subdir.
+        def _priority(n: str) -> int:
+            if n.endswith("conversations.json"):
+                return 0
+            if n.endswith("MyActivity.json"):
+                return 1
+            if "Gemini" in n:
+                return 2
+            return 3
+        candidates.sort(key=_priority)
         errors = []
         for name in candidates:
-            primary = name.endswith(("conversations.json", "MyActivity.json"))
+            primary = _priority(name) <= 2
             try:
-                return _parse_json_bytes(name, _read_bounded(zf, name))
+                return _parse_json_bytes(name, _read_bounded(zf, name), zf=zf)
             except FileTooLargeError:
                 if primary:
                     raise  # the file the user actually needs is too big — surface it
@@ -90,10 +122,14 @@ def _parse_zip(raw: bytes) -> ParseResult:
         )
 
 
-def _parse_json_bytes(filename: str, raw: bytes) -> ParseResult:
+def _parse_json_bytes(filename: str, raw: bytes,
+                      *, zf: zipfile.ZipFile | None = None) -> ParseResult:
     data = json.loads(raw)
     for parser in _CHAT_PARSERS:
         if parser.looks_like(data):
+            if zf is not None and getattr(parser, "WANTS_ATTACHMENTS", False):
+                attachments = _collect_zip_attachments(zf, exclude=filename)
+                return parser.parse(data, attachments=attachments)
             return parser.parse(data)
     raise UnknownFormatError(
         f"{filename}: ChatGPT / Claude / Gemini のいずれの形式とも一致しません"

@@ -177,9 +177,10 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **リスク**: 低（additive な列追加のみ。fallback は据え置き）。
 - **依存**: P1-A。
 - **残課題**: claude の実エクスポートは検証済み（2026-06-24、`uuid` ベースの
-  source_message_id が全 5698 メッセージで埋まり、warnings 0）。chatgpt/gemini は未検証。
-  codex の message ID はローカルログに安定 ID が乏しく未対応。fallback の順序非依存化は
-  将来課題（実益小）。
+  source_message_id が全 5698 メッセージで埋まり、warnings 0）。gemini も実 Takeout
+  で検証済み（2026-06-24、source_id は `time-sha256(time|title_raw)[:16]` で内容由来、
+  message レベルの安定 ID は無し）。chatgpt は未検証。codex の message ID はローカル
+  ログに安定 ID が乏しく未対応。fallback の順序非依存化は将来課題（実益小）。
 
 ### P1-D. integrity-check（admin CLI）— ✅ 実装済み（2026-06-22）
 - **現状**: 完了。`db.integrity_check()`（読み取り専用、`{ok, checks, problems}` を返す）
@@ -273,9 +274,13 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **依存**: P1-A（migration runner）。
 - **残課題**: claude_export は実 export で検証＆対応済み（2026-06-24、message レベルの
   `attachments[]` / `files[]` を `ParsedAttachment` 化、`extracted_content` を
-  `extracted_text` に保存、text 空でも添付あれば message を残す。テスト 97 passed）。
-  chatgpt / gemini の実エクスポートでの添付表現は未検証（NOTES.md の既知の限界）。
-  bytes 自体の保存（attached blob store）と OCR/PDF 抽出は別タスク（Phase 1 のスコープ外）。
+  `extracted_text` に保存、text 空でも添付あれば message を残す）。
+  gemini も実 Takeout で検証＆対応済み（2026-06-24、`safeHtmlItem` を assistant
+  message に、`imageFile` / `attachedFiles[]` / `subtitles[].url` を user/assistant に
+  振り分けて `ParsedAttachment` 化、ZIP 同梱画像は parse_upload 経由で hash+size を
+  取得。テスト 99 passed）。chatgpt の実エクスポートでの添付表現は未検証
+  （NOTES.md の既知の限界）。bytes 自体の保存（attached blob store）と OCR/PDF 抽出は
+  別タスク（Phase 1 のスコープ外）。
 
 ---
 
