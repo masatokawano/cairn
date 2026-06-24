@@ -67,7 +67,23 @@
 
 - `chat_messages[].sender` は `human`/`assistant`。
 - 本文は新形式 `content` ブロック配列を優先、なければ旧形式 `text`。
-- ※実エクスポートでの検証はまだ。
+- **添付は content ブロックではなく message レベル**にある（2026-06-24, 実 export
+  517 会話で検証）:
+  - `attachments[]`: `{file_name, file_size, file_type, extracted_content}` 形式。
+    `extracted_content` は Claude が事前に抽出済みのテキスト本文（数十KB〜数百KB）。
+    実 export では 120 件、すべて human 側。
+  - `files[]`: `{file_uuid, file_name}` 形式の **UUID 参照のみ**。バイナリ本体は
+    export に含まれない（512 件、ほぼ human）。
+- パーサーは attachments[] を `ParsedAttachment(source_ref=file_name,
+  mime=file_typeから推定, size=file_size, hash=sha256(extracted_content),
+  extracted_text=extracted_content)`、files[] を `ParsedAttachment(source_ref=file_uuid)`
+  に変換。**bytes が手元に無いため hash は extracted_content のテキストハッシュ**
+  （他ソースの bytes hash とは意味が異なる。テキストが変われば updated 検知できる）。
+- text 空でも添付があれば message を残す（claude_cli と同方針）。実 export では 75
+  メッセージ（添付/UUID のみのターン）がこれで救済される。
+- content ブロック内には `image` / `document` は出現しなかった（claude_cli の base64
+  document とは別仕様）。block type は `text` / `tool_use` / `tool_result` /
+  `thinking` / `token_budget` のみで、text 以外は従来通り捨てる。
 
 ## Gemini (Takeout My Activity)
 
@@ -101,8 +117,11 @@
   実データで `application/pdf` を確認（base64 数十〜百KB）。`image` ブロックも
   同じ source 形（type:"base64" or "url"）の前提でパース。
 - **codex_cli**: content は `input_text` / `output_text` のみ。添付なし。
-- **chatgpt / claude_export / gemini**: 現状 fixture には添付ブロックなし。実エクスポート
-  での挙動は未検証。
+- **claude_export**: 実 export で検証（2026-06-24）。添付は content ブロックでなく
+  message レベルの `attachments[]` / `files[]` に置かれる。`extracted_content` は
+  `extracted_text` として保存し、hash は extracted_content のテキストハッシュ
+  （bytes が無いため bytes hash と意味が異なる）。詳細は「Claude エクスポート」節参照。
+- **chatgpt / gemini**: 現状 fixture には添付ブロックなし。実エクスポートでの挙動は未検証。
 - **バイナリ本体は保存しない**方針（attachments は metadata only: source_ref / mime /
   size / hash / extracted_text）。redact-apply の責務を text に限定し、ストレージ爆発も回避。
   ハッシュは base64 デコード後の生バイトの sha256。

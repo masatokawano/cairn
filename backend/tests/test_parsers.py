@@ -38,6 +38,77 @@ def test_claude_export_parse():
     assert len(conv.messages) == 3  # content-blocks msg, plus old text-only msg
     assert conv.messages[1].text == "trigramトークナイザを使うと部分一致検索が可能です。"
     assert conv.messages[2].text == "古い形式のtextのみのメッセージ"
+    # Fixture has no attachments → attachments stays empty (additive).
+    assert all(m.attachments == [] for m in conv.messages)
+
+
+def test_claude_export_attachments_and_files():
+    """Real Claude.ai export carries uploads at the message level, not in
+    content blocks: `attachments[]` with extracted text, and `files[]` with
+    UUID references whose bytes are not in the export."""
+    import hashlib as _h
+
+    data = [{
+        "uuid": "conv-1",
+        "name": "添付ありの会話",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:01:00Z",
+        "chat_messages": [
+            {
+                "uuid": "m1",
+                "sender": "human",
+                "text": "このファイルの要約をお願い",
+                "content": [{"type": "text", "text": "このファイルの要約をお願い"}],
+                "created_at": "2026-01-01T00:00:00Z",
+                "attachments": [{
+                    "file_name": "paste.txt",
+                    "file_size": 12,
+                    "file_type": "txt",
+                    "extracted_content": "hello world!",
+                }],
+                "files": [{"file_uuid": "f-uuid-1", "file_name": "image.png"}],
+            },
+            {
+                # text-empty turn that is "just an upload" — must still be kept.
+                "uuid": "m2",
+                "sender": "human",
+                "text": "",
+                "content": [],
+                "created_at": "2026-01-01T00:00:30Z",
+                "attachments": [],
+                "files": [{"file_uuid": "f-uuid-2", "file_name": "doc.pdf"}],
+            },
+            {
+                "uuid": "m3",
+                "sender": "assistant",
+                "text": "了解。",
+                "content": [{"type": "text", "text": "了解。"}],
+                "created_at": "2026-01-01T00:01:00Z",
+                "attachments": [],
+                "files": [],
+            },
+        ],
+    }]
+    result = claude_export.parse(data)
+    assert result.warnings == []
+    conv = result.conversations[0]
+    assert [m.text for m in conv.messages] == ["このファイルの要約をお願い", "", "了解。"]
+    # m1: one extracted attachment + one file ref.
+    m1_atts = conv.messages[0].attachments
+    assert len(m1_atts) == 2
+    ext = next(a for a in m1_atts if a.extracted_text is not None)
+    assert ext.source_ref == "paste.txt"
+    assert ext.mime == "text/plain"
+    assert ext.size == 12
+    assert ext.extracted_text == "hello world!"
+    assert ext.hash == _h.sha256(b"hello world!").hexdigest()
+    fref = next(a for a in m1_atts if a.extracted_text is None)
+    assert fref.source_ref == "f-uuid-1"
+    assert fref.hash is None
+    # m2: text was empty but the file-only turn is preserved.
+    assert conv.messages[1].attachments[0].source_ref == "f-uuid-2"
+    # m3: no attachments.
+    assert conv.messages[2].attachments == []
 
 
 def test_gemini_parse():
