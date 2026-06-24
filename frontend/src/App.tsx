@@ -35,6 +35,25 @@ type Conversation = {
 
 type SourceStat = { source: string; conversations: number; messages: number }
 
+type ImportRun = {
+  id: number
+  source: string
+  input_name: string | null
+  started_at: string
+  completed_at: string | null
+  parser_version: string | null
+  inserted: number
+  updated: number
+  skipped: number
+  failed: number
+  conversations: number
+  warnings: number
+  warning_summary: string | null
+  content_hash: string | null
+  status: 'ok' | 'error'
+  error: string | null
+}
+
 const SOURCES: { key: string; label: string }[] = [
   { key: 'chatgpt', label: 'ChatGPT' },
   { key: 'claude', label: 'Claude' },
@@ -97,6 +116,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [importRuns, setImportRuns] = useState<ImportRun[] | null>(null)
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const debounce = useRef<number>(0)
 
@@ -146,6 +167,17 @@ export default function App() {
     api<Conversation>(`/api/conversations/${id}`)
       .then(setSelected)
       .catch((e: Error) => setNotice(`会話の取得に失敗しました: ${e.message}`))
+  }
+
+  const openImportRuns = () => {
+    setExpandedRunId(null)
+    setImportRuns([])  // open the overlay immediately; results stream in below
+    api<{ results: ImportRun[] }>('/api/import-runs?limit=50')
+      .then((d) => setImportRuns(d.results))
+      .catch((e: Error) => {
+        setImportRuns(null)
+        setNotice(`取り込み履歴の取得に失敗しました: ${e.message}`)
+      })
   }
 
   type ImportResult = {
@@ -224,6 +256,9 @@ export default function App() {
           </button>
           <button onClick={syncNow} disabled={busy}>
             CLIログ同期
+          </button>
+          <button onClick={openImportRuns} disabled={busy}>
+            取り込み履歴
           </button>
           <input
             ref={fileInput}
@@ -315,6 +350,64 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {importRuns !== null && (
+        <div className="overlay" onClick={() => setImportRuns(null)}>
+          <div className="thread" onClick={(e) => e.stopPropagation()}>
+            <div className="thread-head">
+              <h2>取り込み履歴</h2>
+              <button className="close" onClick={() => setImportRuns(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="thread-meta">
+              最新 {importRuns.length} 件（古い run から FIFO で 0600 の DB に追記）
+            </div>
+            <div className="messages">
+              {importRuns.length === 0 ? (
+                <p className="empty">取り込み履歴はまだありません。</p>
+              ) : (
+                importRuns.map((r) => {
+                  const hasDetail = r.warnings > 0 || r.status === 'error'
+                  const expanded = expandedRunId === r.id
+                  return (
+                    <div key={r.id} className={`run run-${r.status}`}>
+                      <div
+                        className="run-head"
+                        onClick={() => hasDetail && setExpandedRunId(expanded ? null : r.id)}
+                        style={{ cursor: hasDetail ? 'pointer' : 'default' }}
+                      >
+                        <span className={`badge badge-${r.source}`}>{sourceLabel(r.source)}</span>
+                        <span className="run-name" title={r.input_name ?? ''}>
+                          {r.input_name ?? '(no name)'}
+                        </span>
+                        <span className="run-date">{fmtDate(r.started_at)}</span>
+                      </div>
+                      <div className="run-counts">
+                        <span className={`run-status run-status-${r.status}`}>
+                          {r.status === 'ok' ? 'ok' : 'error'}
+                        </span>
+                        <span>会話 {r.conversations}</span>
+                        <span>+{r.inserted}</span>
+                        <span>~{r.updated}</span>
+                        <span>={r.skipped}</span>
+                        {r.failed > 0 && <span className="run-failed">×{r.failed}</span>}
+                        {r.warnings > 0 && <span className="run-warn">⚠ {r.warnings}</span>}
+                        {hasDetail && <span className="run-toggle">{expanded ? '▼' : '▶'}</span>}
+                      </div>
+                      {expanded && (
+                        <pre className="run-detail">
+                          {r.status === 'error' ? r.error ?? '(no detail)' : r.warning_summary ?? ''}
+                        </pre>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div className="overlay" onClick={() => setSelected(null)}>

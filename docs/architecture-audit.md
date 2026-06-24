@@ -154,9 +154,13 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **リスク**: 低〜中（全 ingest 経路に記録を挿す。choke point は `upsert_conversations` だが
   source/path 情報は呼び出し側にあるため呼び出し側で記録）。
 - **依存**: P1-A（migration 経由で既存DBに table 追加）。
-- **残課題**: Web UI への履歴/ warning 表示は未実装（Codex 項目6・別タスク）。failed は
-  会話単位の失敗カウント用に列を用意したが現状は parse 例外を status=error の run として
-  記録（個別会話失敗は warning に含む）。
+- **残課題**: failed は会話単位の失敗カウント用に列を用意したが現状は parse 例外を
+  status=error の run として記録（個別会話失敗は warning に含む）。
+- **Web UI 追補（2026-06-24）**: ヘッダの「取り込み履歴」ボタンから直近 50 件を
+  オーバーレイ表示。各 run は source バッジ / input_name / started_at /
+  conversations・inserted(+) / updated(~) / skipped(=) / failed(×) / warnings(⚠) と
+  status を表示し、warning または error がある行はクリックで `warning_summary` /
+  `error` を展開（`/api/import-runs?limit=50` を利用）。
 
 ### P1-C. stable IDs + idempotency 回帰テスト — ✅ 実装済み（2026-06-22、安全コア）
 - **現状**: 完了。`messages.source_message_id` 列を `_SCHEMA` に追加 + migration v3
