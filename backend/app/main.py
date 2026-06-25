@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
@@ -23,8 +24,6 @@ from .parsers import PARSER_VERSION, FileTooLargeError, UnknownFormatError, pars
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cairn")
 
-app = FastAPI(title="Cairn")
-
 MAX_UPLOAD_BYTES = int(os.environ.get("CAIRN_MAX_UPLOAD_MB", "500")) * 1024 * 1024
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -32,6 +31,29 @@ _EXTRA_HOSTS = {
     h.strip().lower() for h in os.environ.get("CAIRN_ALLOW_HOSTS", "").split(",") if h.strip()
 }
 _ALLOWED_HOSTS = _LOCAL_HOSTS | _EXTRA_HOSTS
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """FastAPI lifespan replacing the deprecated on_event hooks.
+
+    Startup: opens the SQLite connection for the main thread and kicks off
+    the CLI background-sync daemon. Shutdown is a no-op — the sync thread
+    is a daemon (dies with the process), and SQLite cleans up naturally.
+    """
+    db.connect()
+    cli_sync.start_background_sync()
+    if _EXTRA_HOSTS:
+        log.warning(
+            "CAIRN_ALLOW_HOSTS=%s — localhost 以外の Host を許可しています。"
+            "会話アーカイブが他ホストから読める可能性があります。検証用途以外では解除してください。",
+            ",".join(sorted(_EXTRA_HOSTS)),
+        )
+    log.info("Cairn API ready (bind to 127.0.0.1; do not expose to LAN)")
+    yield
+
+
+app = FastAPI(title="Cairn", lifespan=lifespan)
 
 
 def _hostname(value: str) -> str | None:
@@ -66,19 +88,6 @@ async def local_only(request: Request, call_next):
                     content={"detail": "Origin が localhost ではないため拒否しました"},
                 )
     return await call_next(request)
-
-
-@app.on_event("startup")
-def startup():
-    db.connect()
-    cli_sync.start_background_sync()
-    if _EXTRA_HOSTS:
-        log.warning(
-            "CAIRN_ALLOW_HOSTS=%s — localhost 以外の Host を許可しています。"
-            "会話アーカイブが他ホストから読める可能性があります。検証用途以外では解除してください。",
-            ",".join(sorted(_EXTRA_HOSTS)),
-        )
-    log.info("Cairn API ready (bind to 127.0.0.1; do not expose to LAN)")
 
 
 async def _read_upload_capped(file: UploadFile) -> bytes:
