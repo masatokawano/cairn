@@ -233,13 +233,21 @@ ROADMAP §5.3 の P2-1〜P2-5 を、垂直スライス（schema → repo functio
 - 受入: ✅ 3 mode 動作、既存呼び出し非破壊、各結果に match_reason 等あり。RRF が
   両 path hit の会話を上位に押し上げる挙動を test_hybrid_search で検証。
 
-### P2-3. 検索 UI
+### P2-3. 検索 UI（実装済み）
 
-- `frontend/src/App.tsx` に mode 切替（segmented control / tabs）。
-- 検索結果に matched_keywords / semantic_score バッジを表示。
-- source / date filter は既存があれば再利用、無ければ追加。
-- **受入**: keyword / semantic / hybrid を UI から切替できる、結果スニペットと
-  ヒット理由が見える、`npm run build` が通る。
+- `frontend/src/App.tsx` に mode 切替（3 ボタンの segmented control）を追加。
+  UI 既定は **`hybrid`**（バックエンド既定の `keyword` は API 後方互換のため、
+  UI は積極的に意味検索を含める）。`localStorage('cairn.searchMode')` に保存。
+- 検索結果に
+  - `reason` バッジ（K / S / K+S）
+  - `semantic_score`（cosine、2 桁丸め）
+  - `matched_keywords` chips（[[…]] 由来の語、最大 8 件）
+  を追加。スニペット内の `[[…]]` 強調は既存 `<Snippet>` で温存。
+- source フィルタは既存 chip 列を再利用。date フィルタは P2-3 では省略（別タスク化）。
+- `/api/search` が `RuntimeError("no embeddings…")` を 400 + detail に変換し、
+  UI の `notice` バナーで「`admin reindex` を実行してください」をそのまま表示。
+- 受入: ✅ 3 mode を UI から切替可、結果に match_reason / semantic_score /
+  matched_keywords が見える、`npm run build` 通過、`145 passed`。
 
 ### P2-4. MCP 拡張
 

@@ -160,11 +160,15 @@ def search(
     offset: int = 0,
     mode: str = Query("keyword", pattern="^(keyword|semantic|hybrid)$"),
 ):
-    return {
-        "query": q,
-        "mode": mode,
-        "results": db.search(q, mode=mode, source=source, limit=limit, offset=offset),
-    }
+    try:
+        results = db.search(q, mode=mode, source=source, limit=limit, offset=offset)
+    except RuntimeError as exc:
+        # The only RuntimeError db.search raises today is the "no embeddings
+        # yet" path from _active_embedding_provider(). Turning it into a 400
+        # with the message intact lets the UI's generic error renderer show
+        # the actionable hint ("run admin reindex first") instead of HTTP 500.
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"query": q, "mode": mode, "results": results}
 
 
 @app.get("/api/conversations")

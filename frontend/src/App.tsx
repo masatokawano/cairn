@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 
+type SearchMode = 'keyword' | 'semantic' | 'hybrid'
+
+type MatchReason = 'keyword' | 'semantic' | 'both'
+
 type SearchHit = {
   conversation_id: number
   source: string
@@ -10,6 +14,9 @@ type SearchHit = {
   role: string
   hit_count: number
   meta: { cwd?: string }
+  match_reason: MatchReason
+  matched_keywords: string[]
+  semantic_score: number | null
 }
 
 type ConvSummary = {
@@ -106,9 +113,30 @@ function Snippet({ text }: { text: string }) {
   )
 }
 
+const SEARCH_MODES: { key: SearchMode; label: string; hint: string }[] = [
+  { key: 'hybrid', label: 'Hybrid', hint: 'キーワード + 意味の両方（RRF）' },
+  { key: 'keyword', label: 'Keyword', hint: '完全一致・部分一致（FTS5）' },
+  { key: 'semantic', label: 'Semantic', hint: '意味の近さ（embedding cosine）' },
+]
+
+// Persisted in localStorage so a returning user keeps their choice. Default
+// is hybrid because the backend default (`keyword`) is for API back-compat,
+// not the recommended UX.
+function loadMode(): SearchMode {
+  const v = localStorage.getItem('cairn.searchMode')
+  return v === 'keyword' || v === 'semantic' || v === 'hybrid' ? v : 'hybrid'
+}
+
+const REASON_BADGE: Record<MatchReason, string> = {
+  keyword: 'K',
+  semantic: 'S',
+  both: 'K+S',
+}
+
 export default function App() {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<string | null>(null)
+  const [mode, setMode] = useState<SearchMode>(loadMode)
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [recent, setRecent] = useState<ConvSummary[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
@@ -141,13 +169,13 @@ export default function App() {
   }, [refreshStats, loadRecent])
 
   const runSearch = useCallback(
-    (q: string, src: string | null) => {
+    (q: string, src: string | null, m: SearchMode) => {
       if (!q.trim()) {
         setHits(null)
         loadRecent(src)
         return
       }
-      const p = new URLSearchParams({ q })
+      const p = new URLSearchParams({ q, mode: m })
       if (src) p.set('source', src)
       api<{ results: SearchHit[] }>(`/api/search?${p}`)
         .then((d) => setHits(d.results))
@@ -159,9 +187,14 @@ export default function App() {
   // Debounced live search
   useEffect(() => {
     window.clearTimeout(debounce.current)
-    debounce.current = window.setTimeout(() => runSearch(query, source), 250)
+    debounce.current = window.setTimeout(() => runSearch(query, source, mode), 250)
     return () => window.clearTimeout(debounce.current)
-  }, [query, source, runSearch])
+  }, [query, source, mode, runSearch])
+
+  // Persist mode so a refresh doesn't reset to the default.
+  useEffect(() => {
+    localStorage.setItem('cairn.searchMode', mode)
+  }, [mode])
 
   const openConversation = (id: number) => {
     api<Conversation>(`/api/conversations/${id}`)
@@ -205,7 +238,7 @@ export default function App() {
     }
     setBusy(false)
     refreshStats()
-    runSearch(query, source)
+    runSearch(query, source, mode)
   }
 
   type SyncResult = {
@@ -228,7 +261,7 @@ export default function App() {
     }
     setBusy(false)
     refreshStats()
-    runSearch(query, source)
+    runSearch(query, source, mode)
   }
 
   const totalConvs = stats.reduce((a, s) => a + s.conversations, 0)
@@ -286,6 +319,20 @@ export default function App() {
           onChange={(e) => setQuery(e.target.value)}
           autoFocus
         />
+        <div className="mode-toggle" role="radiogroup" aria-label="検索モード">
+          {SEARCH_MODES.map((m) => (
+            <button
+              key={m.key}
+              role="radio"
+              aria-checked={mode === m.key}
+              title={m.hint}
+              className={`mode-btn ${mode === m.key ? 'active' : ''}`}
+              onClick={() => setMode(m.key)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="filters">
@@ -317,9 +364,35 @@ export default function App() {
                 <div key={h.conversation_id} className="result" onClick={() => openConversation(h.conversation_id)}>
                   <div className="result-head">
                     <span className={`badge badge-${h.source}`}>{sourceLabel(h.source)}</span>
+                    <span
+                      className={`reason reason-${h.match_reason}`}
+                      title={
+                        h.match_reason === 'both'
+                          ? 'キーワードと意味の両方でヒット'
+                          : h.match_reason === 'semantic'
+                          ? '意味の近さでヒット'
+                          : 'キーワード一致でヒット'
+                      }
+                    >
+                      {REASON_BADGE[h.match_reason]}
+                    </span>
+                    {h.semantic_score !== null && (
+                      <span className="sem-score" title="cosine 類似度">
+                        {h.semantic_score.toFixed(2)}
+                      </span>
+                    )}
                     <span className="result-title">{h.title}</span>
                     <span className="result-date">{fmtDate(h.updated_at)}</span>
                   </div>
+                  {h.matched_keywords.length > 0 && (
+                    <div className="kw-chips">
+                      {h.matched_keywords.slice(0, 8).map((kw) => (
+                        <span key={kw} className="kw-chip">
+                          {kw}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="result-snippet">
                     <Snippet text={h.snippet} />
                     {h.hit_count > 1 && <span className="hit-count">+{h.hit_count - 1}件ヒット</span>}
