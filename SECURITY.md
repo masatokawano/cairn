@@ -100,6 +100,15 @@ uvx pip-audit -r requirements.lock --no-deps --disable-pip   # 既知脆弱性�
 ls -l data/                                                  # cairn.db* が 0600 (-rw-------) であること
 ```
 
+## SQLite 拡張ロード（sqlite-vec, P2-1c）
+
+- `db.connect()` が `sqlite_vec` ロードのために `enable_load_extension(True)` を一時的に
+  立ち上げ、**ロード完了後すぐ `False` に戻す**。常時 True 放置はしない。
+- 拡張ロードが OS / SQLite ビルドの事情で失敗する環境では、自動的に NumpyIndex
+  フォールバックに切り替わり機能継続する（ADR-0001 §5.1）。
+- `CAIRN_VECTOR_INDEX=numpy` 環境変数で明示的にフォールバックに固定可能（拡張に
+  懸念があるが他機能は使いたい場合のエスケープハッチ）。
+
 ## 残課題（将来）
 
 - bearer token 認証（共有利用が必要になった場合の前提条件）

@@ -12,7 +12,8 @@ import threading
 
 from . import redact
 from .chunking import CURRENT_CHUNKING_VERSION, chunk_text
-from .embedding import EmbeddingProvider, bytes_to_vector, cosine_similarity
+from .embedding import EmbeddingProvider
+from .vector_index import NumpyIndex, SQLiteVecIndex, VectorIndex, try_load_sqlite_vec
 
 log = logging.getLogger("cairn.db")
 
@@ -21,6 +22,12 @@ DB_PATH = os.environ.get(
 )
 
 _local = threading.local()
+
+# Set by connect() per thread; reflects the actual outcome of attempting to
+# load the sqlite-vec extension on that connection. False means the
+# NumpyIndex fallback path is in use even if sqlite-vec is installed.
+def _sqlite_vec_loaded() -> bool:
+    return getattr(_local, "sqlite_vec_loaded", False)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -317,6 +324,13 @@ def connect() -> sqlite3.Connection:
         # Overwrite deleted content with zeros so secrets don't linger in
         # free pages / WAL after deletes and updates.
         conn.execute("PRAGMA secure_delete = ON")
+        # Try to load the sqlite-vec extension early; remember the outcome
+        # per-thread so vector_index() can route to NumpyIndex transparently
+        # when the extension isn't available. Override with CAIRN_VECTOR_INDEX=numpy.
+        if os.environ.get("CAIRN_VECTOR_INDEX") == "numpy":
+            _local.sqlite_vec_loaded = False
+        else:
+            _local.sqlite_vec_loaded = try_load_sqlite_vec(conn)
         # A fresh DB (no tables yet) is built from the latest _SCHEMA and
         # stamped directly — it must NOT run migrations meant for older shapes.
         # An existing DB (tables present, possibly pre-versioning at v0) is
@@ -490,6 +504,18 @@ def rechunk_messages(
     return stats
 
 
+def vector_index() -> VectorIndex:
+    """Return the active VectorIndex implementation for this connection.
+
+    SQLiteVecIndex when the extension loaded, else NumpyIndex. The choice is
+    per-thread because the load attempt happens in connect(); CAIRN_VECTOR_INDEX=numpy
+    forces NumpyIndex regardless. The returned object closes over `connect()`,
+    so it always operates on the current thread-local connection."""
+    if _sqlite_vec_loaded():
+        return SQLiteVecIndex(connect)
+    return NumpyIndex(connect)
+
+
 def embed_chunks(
     provider: EmbeddingProvider,
     *,
@@ -540,6 +566,7 @@ def embed_chunks(
 
     dimension = provider.dimension
     now = utcnow_iso()
+    idx = vector_index()
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
         vectors = provider.embed_passages([r["text"] for r in batch])
@@ -555,6 +582,11 @@ def embed_chunks(
                     for r, v in zip(batch, vectors)
                 ],
             )
+            # Mirror to the vector index so KNN stays current. For NumpyIndex
+            # this is a no-op (it reads from the embeddings table directly);
+            # for SQLiteVecIndex it keeps the vec0 mirror in sync.
+            for r, v in zip(batch, vectors):
+                idx.upsert(r["id"], v, dimension)
         stats["chunks"] += len(batch)
     return stats
 
@@ -571,52 +603,68 @@ def find_similar_chunks(
 ) -> list[dict]:
     """Top-k chunks by cosine similarity for one (provider, model).
 
-    P2-1b prototype: pure-Python cosine over every matching row. Adequate for
-    a personal archive scale (tens of thousands of chunks) and intentionally
-    dependency-free; P2-1c replaces this path with a real vector index.
-
-    Filters narrow the candidate set *before* scoring, so source/date filters
-    cost the same as in keyword search. Returns dicts with chunk_id, message_id,
-    conversation_id, score, and the chunk text.
+    Two-stage pipeline: filter candidates via SQL (provider/model + optional
+    source/date), then delegate KNN to the active VectorIndex (sqlite-vec
+    when available, NumpyIndex otherwise). The filter step keeps the search
+    cheap even on archives with hundreds of thousands of embeddings.
     """
     conn = connect()
-    q = bytes_to_vector(query_vector)
+    # Stage 1: candidate chunk_ids for this (provider, model) + filters.
+    # The dimension check excludes corrupted / cross-model embeddings whose
+    # vector length disagrees with the query — important because the vector
+    # index may hold an independent copy that could otherwise be matched.
+    query_dim = len(query_vector) // 4
     sql = (
-        "SELECT e.chunk_id, e.vector, e.dimension, "
-        "       ch.message_id, ch.conversation_id, ch.text, "
-        "       c.source, c.updated_at "
-        "FROM embeddings e "
+        "SELECT e.chunk_id FROM embeddings e "
         "JOIN chunks ch ON ch.id = e.chunk_id "
         "JOIN conversations c ON c.id = ch.conversation_id "
-        "WHERE e.provider=? AND e.model=?"
+        "WHERE e.provider=? AND e.model=? AND e.dimension=?"
     )
-    params: list = [provider, model]
+    params: list = [provider, model, query_dim]
     if source:
         sql += " AND c.source=?"; params.append(source)
     if after:
         sql += " AND c.updated_at >= ?"; params.append(after)
     if before:
         sql += " AND c.updated_at <= ?"; params.append(before)
-    rows = conn.execute(sql, params).fetchall()
-    scored: list[dict] = []
-    for row in rows:
-        # A row with a wrong-dimension vector can't be the same model, so
-        # something has stamped the wrong (provider, model) on it — skip
-        # rather than silently scoring garbage.
-        if row["dimension"] != len(q):
-            continue
-        score = cosine_similarity(q, bytes_to_vector(row["vector"]))
-        scored.append({
-            "chunk_id": row["chunk_id"],
-            "message_id": row["message_id"],
-            "conversation_id": row["conversation_id"],
+    candidates = [r[0] for r in conn.execute(sql, params).fetchall()]
+    if not candidates:
+        return []
+
+    # Stage 2: KNN. Prefer the configured index; if it returns nothing
+    # (sqlite-vec dim mismatch, vec0 not yet populated), fall back to
+    # NumpyIndex against the same embeddings table.
+    idx = vector_index()
+    pairs = idx.search(query_vector, k, candidates=candidates)
+    if not pairs and idx.name != "numpy":
+        pairs = NumpyIndex(connect).search(query_vector, k, candidates=candidates)
+    if not pairs:
+        return []
+
+    # Stage 3: hydrate top-k with chunk text and conversation metadata.
+    chunk_ids = [c for c, _ in pairs]
+    placeholders = ",".join("?" * len(chunk_ids))
+    rows = conn.execute(
+        f"SELECT ch.id, ch.message_id, ch.conversation_id, ch.text, "
+        f"       c.source, c.updated_at "
+        f"FROM chunks ch JOIN conversations c ON c.id = ch.conversation_id "
+        f"WHERE ch.id IN ({placeholders})",
+        chunk_ids,
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
+    return [
+        {
+            "chunk_id": cid,
+            "message_id": by_id[cid]["message_id"],
+            "conversation_id": by_id[cid]["conversation_id"],
             "score": score,
-            "text": row["text"],
-            "source": row["source"],
-            "updated_at": row["updated_at"],
-        })
-    scored.sort(key=lambda r: r["score"], reverse=True)
-    return scored[:k]
+            "text": by_id[cid]["text"],
+            "source": by_id[cid]["source"],
+            "updated_at": by_id[cid]["updated_at"],
+        }
+        for cid, score in pairs
+        if cid in by_id
+    ]
 
 
 def record_import_run(
@@ -1120,6 +1168,20 @@ def integrity_check() -> dict:
         checks["orphan_embeddings"] = orphan_embeddings
         if orphan_embeddings:
             problems.append(f"{orphan_embeddings} orphan embeddings")
+
+    # 9. Orphan vector-index rows — vec0 doesn't honour FK cascade, so chunks
+    # deleted via cascade can leave stale rows behind. Reported as info, not
+    # a hard problem; `admin rebuild-vector-index` clears them.
+    has_chunk_vecs = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chunk_vecs'"
+    ).fetchone()[0]
+    if has_chunk_vecs:
+        orphan_vecs = conn.execute(
+            "SELECT COUNT(*) FROM chunk_vecs v "
+            "LEFT JOIN chunks ch ON ch.id = v.rowid WHERE ch.id IS NULL"
+        ).fetchone()[0]
+        checks["orphan_vector_index"] = orphan_vecs
+        # not appended to problems: orphans are tolerated until rebuild
 
     return {"ok": not problems, "checks": checks, "problems": problems}
 

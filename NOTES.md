@@ -259,6 +259,28 @@
   個人アーカイブ規模なら数万 chunks まで秒オーダー、P2-1c で sqlite-vec ／ numpy
   fallback に差し替える前提（ADR-0001）。
 
+## sqlite-vec / vector index（P2-1c, 2026-06-25）
+
+- `sqlite-vec` の vec0 virtual table はカラム制約に**癖**が多い。実装で踏んだもの:
+  - **`INSERT OR REPLACE` 不可**。再 upsert は `DELETE` → `INSERT` の 2 ステップ。
+  - **`k = ?` と `LIMIT` の同時指定が禁止**。エラー: `Only LIMIT or 'k =?' can be provided`。
+  - **`rowid IN (?)` 単一要素は SQLite が `rowid = ?` に書換える**結果、vec0 が
+    LIMIT 制約を検知できず `A LIMIT or 'k = ?' constraint is required` で失敗する。
+    解決: `LIMIT` ではなく `k = ?` 制約を使う（書換えに耐える）。
+- `db.connect()` で `enable_load_extension(True)` → `sqlite_vec.load(conn)` を試行し、
+  thread-local に成否を保存（`_sqlite_vec_loaded()`）。ロード後は `enable_load_extension(False)`
+  に戻して攻撃面を最小化（SECURITY.md にも反映）。
+- `CAIRN_VECTOR_INDEX=numpy` で明示的に NumpyIndex を強制可能（テスト用 / 拡張ロード
+  が不安定な環境のエスケープハッチ、ADR-0001 §7.3）。
+- **vec0 は外部 FK CASCADE を受けない**。chunks 削除で embeddings は CASCADE 削除されるが、
+  vec0 行は残る（orphan）。integrity_check が `orphan_vector_index` で数を報告、
+  `admin rebuild-vector-index` で再構築するとクリーンになる。
+- **vec0 は単一次元のみ**保持。モデル切替（dim 変更）したら手動で
+  `admin rebuild-vector-index` を実行する必要あり。自動切替はデータロス防止のためしない。
+- find_similar_chunks は 3 段: (1) candidates SQL（provider/model/dim/source/date フィルタ）
+  → (2) vector_index.search で KNN → (3) 上位 k を hydrate。
+  sqlite-vec が空を返したら NumpyIndex フォールバック（dim 不一致や vec0 未populate ケース用）。
+
 ## セキュリティレビューのメモ
 
 - Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。

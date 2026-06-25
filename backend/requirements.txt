@@ -8,3 +8,8 @@ httpx>=0.27
 # Pulls torch + transformers as transitive deps. The provider imports
 # sentence-transformers lazily, so the rest of the app works without it.
 sentence-transformers>=3.0
+# Phase 2 semantic search: vector KNN index (ADR-0001). Pure-Python wheel
+# (~150KB) ships C extension for all majors; loaded lazily in db.connect().
+# A NumpyIndex fallback exists for environments where extension loading is
+# disabled (rare on Apple Silicon, common on managed Linux).
+sqlite-vec>=0.1.6

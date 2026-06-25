@@ -179,13 +179,33 @@ ROADMAP §5.3 の P2-1〜P2-5 を、垂直スライス（schema → repo functio
 - 受入: ✅ provider 1 つで全 chunks に embedding が付く、cosine 上位を返す、
   cascade で chunk 削除と一緒に embedding も消える、orphan_embeddings を integrity_check が報告。
 
-### P2-1c. vector index 実装（ADR-0001 に従う）
+### P2-1c. vector index 実装（ADR-0001 に従う、実装済み）
 
-- ADR で決定した保存先（sqlite-vec / Python+numpy / その他）を実装。
-- abstraction: `app/vector_index.py` に `VectorIndex` 抽象（add / search / rebuild）。
-- バックエンド 1 つを実装し、必要なら fallback を用意。
-- test: 1000 vector で k=10 検索の正答率と速度を簡易計測。
-- **受入**: `db.find_similar_chunks` が ADR 採用バックエンドで動く。
+- `app/vector_index.py`: `VectorIndex` ABC + `NumpyIndex`（embeddings テーブル
+  直接読み、pure Python cosine、依存なし）+ `SQLiteVecIndex`（vec0 virtual
+  table を `cairn.db` 内に作成、`distance_metric=cosine`、chunk_id 単位の
+  rowid キー、`k = ?` 制約で KNN）。
+- `db.connect()` で `try_load_sqlite_vec` を実行し、成否を thread-local に保存。
+  `CAIRN_VECTOR_INDEX=numpy` で明示的に numpy を強制（ADR §7.3 のエスケープ）。
+- `db.embed_chunks` は embeddings 行を書いた直後に `vector_index().upsert()`
+  を呼び、vec0 を 1 行ずつ同期する。
+- `db.find_similar_chunks` は 3 段パイプライン: (1) provider/model/dim/source/date
+  でフィルタした候補 chunk_id を SQL で取得、(2) `vector_index().search(query, k, candidates)`
+  に委譲（sqlite-vec が dim 不一致等で空を返したら NumpyIndex フォールバック）、
+  (3) 上位 k を chunks/conversations と JOIN して hydrate。
+- `admin rebuild-vector-index`: vec0 を embeddings から再構築（モデル切替後、
+  backup 復元後、orphan 整理用）。
+- `integrity_check` に `orphan_vector_index` を追加（vec0 が chunks の CASCADE
+  を受けないため、ゴーストが出る可能性がある。problem 扱いではない）。
+- 受入: ✅ ADR 採用バックエンドで find_similar_chunks 動作、NumpyIndex フォール
+  バックも動作、1000 vector × k=10 検索が 1 秒未満、両 backend が同じ top-k を返す。
+
+#### 既知の制約（P2-1c v1）
+- vec0 はチャンクごとに 1 ベクトル（最後の upsert が勝つ）。同一チャンクに複数
+  provider/model がある場合、勝者でないほうの検索は NumpyIndex フォールバック
+  で正しく動く（速度は劣化）。
+- 次元の異なるモデルに切替えたら `admin rebuild-vector-index` を実行する必要が
+  ある（自動切替はしない、データロス防止のため）。
 
 ### P2-1d. 外部 API provider（opt-in）
 

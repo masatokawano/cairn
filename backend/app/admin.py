@@ -29,6 +29,11 @@ Commands:
                  model). --all overwrites. --provider/--model select the
                  EmbeddingProvider (default: local-sbert with
                  intfloat/multilingual-e5-small). Embeddings are derived data.
+  rebuild-vector-index
+                 Drop and re-populate the sqlite-vec KNN index (P2-1c) from
+                 the embeddings table. Use after switching models (different
+                 dimension), restoring a backup, or to clear orphans flagged
+                 by integrity-check. No-op when the numpy fallback is active.
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -45,6 +50,7 @@ Usage:
                                                  [--conversation-id N]
   .venv/bin/python -m app.admin rechunk [--all | --version-mismatched]
   .venv/bin/python -m app.admin reindex [--provider P] [--model M] [--all | --missing]
+  .venv/bin/python -m app.admin rebuild-vector-index
 """
 from __future__ import annotations
 
@@ -286,6 +292,14 @@ def cmd_reindex(args) -> int:
     return 0
 
 
+def cmd_rebuild_vector_index(_args) -> int:
+    conn = db.connect()
+    idx = db.vector_index()
+    n = idx.rebuild(conn)
+    print(json.dumps({"backend": idx.name, "vectors": n}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -333,6 +347,7 @@ def main(argv=None) -> int:
     g_reindex.add_argument("--missing", action="store_true",
                            help="(default) embed only chunks without a row for this provider+model")
     p_reindex.set_defaults(func=cmd_reindex)
+    sub.add_parser("rebuild-vector-index").set_defaults(func=cmd_rebuild_vector_index)
     args = parser.parse_args(argv)
     return args.func(args)
 
