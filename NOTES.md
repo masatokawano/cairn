@@ -281,6 +281,24 @@
   → (2) vector_index.search で KNN → (3) 上位 k を hydrate。
   sqlite-vec が空を返したら NumpyIndex フォールバック（dim 不一致や vec0 未populate ケース用）。
 
+## ハイブリッド検索（P2-2, 2026-06-25）
+
+- `db.search()` の既定 mode は **`keyword`** に据え置き。`semantic`/`hybrid` を既定に
+  すると、`/api/search` の単純呼び出しでも embedding model のロードと推論が走るため、
+  「既存挙動を変えない」「未設定環境で壊れない」を優先した。UI は P2-3 で明示的に
+  `mode=hybrid` をデフォルトに切り替える。
+- RRF は `score = Σ 1/(k₀ + rank_i + 1)` で k₀=60（Cormack et al. 2009）。**rank ベース**
+  なので BM25 と cosine の絶対スケール差を気にせず統合できるのが採用の決め手。
+- semantic は会話単位で best chunk に集約（同会話の複数 chunk マッチは hit_count に集約）。
+  これにより keyword の `ROW_NUMBER OVER (PARTITION BY c.id ...) rn=1` と同じ結果形状を保つ。
+- hybrid で同会話を両 path が拾ったときは **keyword の snippet を採用**（`[[…]]` 強調が
+  UI に有用）、`semantic_score` は semantic 側から拾う。`match_reason="both"` でフラグ。
+- provider 解決は `_active_embedding_provider()`: ① `CAIRN_EMBED_PROVIDER=name:model` 環境変数、
+  ② embeddings テーブルの最多 (provider, model)、③ どちらも無ければ RuntimeError。
+  単一モデル運用なら **設定不要で動く**のが狙い。
+- API 側は `pattern="^(keyword|semantic|hybrid)$"` で 422 検証し、typo がサイレントに
+  既定 mode へフォールバックしないようにした。
+
 ## セキュリティレビューのメモ
 
 - Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。

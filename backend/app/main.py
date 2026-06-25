@@ -158,8 +158,13 @@ def search(
     source: str | None = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
+    mode: str = Query("keyword", pattern="^(keyword|semantic|hybrid)$"),
 ):
-    return {"query": q, "results": db.search(q, source=source, limit=limit, offset=offset)}
+    return {
+        "query": q,
+        "mode": mode,
+        "results": db.search(q, mode=mode, source=source, limit=limit, offset=offset),
+    }
 
 
 @app.get("/api/conversations")

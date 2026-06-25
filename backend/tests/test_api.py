@@ -142,6 +142,25 @@ def test_sync_conflict_while_locked(client):
     assert client.post("/api/sync", headers={"host": "localhost"}).status_code == 200
 
 
+# --- /api/search mode parameter (P2-2) ----------------------------------------
+
+def test_search_default_mode_is_keyword(client):
+    _upload(client, chatgpt_fixture())
+    r = client.get("/api/search", params={"q": "hello"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "keyword"
+    # Even with no matches it should return 200 with empty results, never crash.
+    assert "results" in body
+
+
+def test_search_rejects_unknown_mode(client):
+    # FastAPI's pattern= validator returns 422 for non-matching values; this
+    # prevents silent fall-through to a default mode when a typo is sent.
+    r = client.get("/api/search", params={"q": "hello", "mode": "fuzzy"})
+    assert r.status_code == 422
+
+
 # --- DB file permissions -------------------------------------------------------
 
 def test_db_file_permissions_0600(client, tmp_path):

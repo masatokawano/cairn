@@ -214,15 +214,24 @@ ROADMAP §5.3 の P2-1〜P2-5 を、垂直スライス（schema → repo functio
 - **受入**: 環境変数で provider 切替可、未設定なら local provider のまま動作。
 - このタスクはオプション（個人用途でローカル model で性能十分なら省略可）。
 
-### P2-2. ハイブリッドランキング
+### P2-2. ハイブリッドランキング（実装済み）
 
-- `db.search(q, mode="keyword"|"semantic"|"hybrid")` を kw-only で追加。
-- semantic: クエリを provider で embed → vector index で k 件 → 会話単位に集約。
-- hybrid: keyword 結果と semantic 結果の **RRF (Reciprocal Rank Fusion)** で統合。
-- 返却に `matched_keywords` / `semantic_score` / `match_reason` を追加。
-- API: `GET /api/search` に `mode` クエリパラメータ追加（デフォルトは hybrid または keyword）。
-- **受入**: 3 mode が動作、既存呼び出しは破壊しない（mode 省略時は既定 mode）、
-  各結果に「なぜヒットしたか」が含まれる。
+- `db.search(q, *, mode="keyword"|"semantic"|"hybrid", provider=...)` を kw-only で追加。
+  既定は **`"keyword"`**（既存呼び出し非破壊 + 不意の embed ロード回避）。
+- 各結果に `match_reason` / `matched_keywords` / `semantic_score` を追加（追加のみ、
+  既存フィールドは温存）。
+- semantic: `_active_embedding_provider()` でクエリを embed → `find_similar_chunks`
+  で over-fetch（`limit*3 + offset + 50`、最低 50） → 会話ごと best chunk に集約 → page。
+- hybrid: keyword と semantic を内部 limit（max(limit*5, 100)）で取得し、
+  **RRF (k₀=60)** で `score = Σ 1/(k₀ + rank_i + 1)` の合算ランキング。
+  両方ヒットした会話は両 path の rank 寄与を受けて自然に上位に。
+  snippet は keyword 側を優先（[[…]] 強調が UI に有用）、semantic_score は semantic 側から。
+- `_active_embedding_provider()` の解決順: ① `CAIRN_EMBED_PROVIDER=name:model`、
+  ② embeddings テーブルの最多 (provider, model)、③ なければ RuntimeError。
+- API: `GET /api/search` に `mode` クエリパラメータ（`^(keyword|semantic|hybrid)$`
+  で 422 検証）、レスポンスに `mode` echo を追加。
+- 受入: ✅ 3 mode 動作、既存呼び出し非破壊、各結果に match_reason 等あり。RRF が
+  両 path hit の会話を上位に押し上げる挙動を test_hybrid_search で検証。
 
 ### P2-3. 検索 UI
 

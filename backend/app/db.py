@@ -736,6 +736,9 @@ def _make_snippet(text: str, q: str, width: int = 80) -> str:
 
 def search(
     q: str,
+    *,
+    mode: str = "keyword",
+    provider: EmbeddingProvider | None = None,
     source: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -744,11 +747,51 @@ def search(
 ) -> list[dict]:
     """Search messages; group hits by conversation (best hit per conversation).
 
-    Multi-term queries (whitespace-separated) are AND. Queries where every
-    term has >=3 chars use FTS5 trigram; otherwise LIKE scan (fine at
-    personal-archive scale). after/before filter on the conversation's
-    updated_at (ISO8601 string comparison).
+    Modes (kw-only):
+      "keyword"  — FTS5 trigram (or LIKE fallback for <3-char terms). Free.
+      "semantic" — embed q, KNN against `embeddings` for the active (provider,
+                   model), aggregate to best chunk per conversation.
+      "hybrid"   — both, fused with Reciprocal Rank Fusion (RRF, k₀=60). The
+                   merge is rank-based, so scale mismatches between BM25 and
+                   cosine don't bias the result; conversations that surface in
+                   *both* lists naturally rank highest.
+
+    Default is "keyword" to keep existing callers byte-compatible and to avoid
+    silently loading an embedding model on every legacy /api/search call.
+    UIs that want semantic by default should pass mode="hybrid" explicitly.
+
+    Each result gains three fields over Phase 1:
+      match_reason     — "keyword" | "semantic" | "both"
+      matched_keywords — list[str] extracted from [[…]] highlights in the snippet
+      semantic_score   — float in (-1,1) when the semantic path fired, else None
     """
+    if mode == "keyword":
+        return _search_keyword(q, source=source, limit=limit, offset=offset,
+                               after=after, before=before)
+    if mode in ("semantic", "hybrid"):
+        if provider is None:
+            provider = _active_embedding_provider()
+        if mode == "semantic":
+            return _search_semantic(q, provider=provider, source=source,
+                                    limit=limit, offset=offset,
+                                    after=after, before=before)
+        return _search_hybrid(q, provider=provider, source=source,
+                              limit=limit, offset=offset,
+                              after=after, before=before)
+    raise ValueError(f"unknown search mode: {mode!r}")
+
+
+def _search_keyword(
+    q: str,
+    *,
+    source: str | None,
+    limit: int,
+    offset: int,
+    after: str | None,
+    before: str | None,
+) -> list[dict]:
+    """Keyword path (Phase 1 logic preserved). Results get
+    match_reason="keyword" and matched_keywords parsed from the snippet."""
     conn = connect()
     terms = [t for t in q.split() if t]
     if not terms:
@@ -839,8 +882,209 @@ def search(
             "role": r["role"],
             "message_id": r["message_id"],
             "hit_count": r["hit_count"],
+            "match_reason": "keyword",
+            "matched_keywords": _extract_highlighted(snip),
+            "semantic_score": None,
         })
     return results
+
+
+def _extract_highlighted(snippet: str) -> list[str]:
+    """Pull the [[…]] highlights out of a snippet, deduped in order of first
+    appearance. Used to surface 'why did this hit?' to the UI without making
+    it re-derive terms from the raw query."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in re.findall(r"\[\[(.+?)\]\]", snippet):
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+# --- Phase 2 semantic / hybrid search --------------------------------------
+
+# RRF constant from Cormack et al. 2009. Conventionally 60; higher dampens
+# the gap between top and tail, lower sharpens it. 60 is fine for personal-
+# archive sizes — the merged list isn't large enough for the choice to matter.
+_RRF_K = 60
+
+
+def _active_embedding_provider() -> EmbeddingProvider:
+    """Resolve the (provider, model) the semantic search should use.
+
+    Resolution order:
+      1. CAIRN_EMBED_PROVIDER env var, format "name:model"
+      2. Most-common (provider, model) in the embeddings table
+      3. Fail loudly — embeddings haven't been generated yet
+
+    Step 2 lets a single-model archive Just Work without configuration; step 1
+    is the override for A/B or multi-model archives where the latest reindex
+    isn't the one the user wants to search against.
+    """
+    spec = os.environ.get("CAIRN_EMBED_PROVIDER")
+    if spec:
+        name, _, model = spec.partition(":")
+        if not name or not model:
+            raise ValueError(
+                f"CAIRN_EMBED_PROVIDER must be 'name:model', got {spec!r}"
+            )
+    else:
+        conn = connect()
+        row = conn.execute(
+            "SELECT provider, model FROM embeddings "
+            "GROUP BY provider, model ORDER BY COUNT(*) DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            raise RuntimeError(
+                "no embeddings exist; run `admin reindex` first or set "
+                "CAIRN_EMBED_PROVIDER=name:model"
+            )
+        name, model = row["provider"], row["model"]
+    if name == "local-sbert":
+        from .embedding.local_sbert import LocalSbertProvider
+        return LocalSbertProvider(model=model)
+    raise ValueError(
+        f"unknown provider {name!r} (known: local-sbert). "
+        "Set CAIRN_EMBED_PROVIDER or extend _active_embedding_provider()."
+    )
+
+
+def _search_semantic(
+    q: str,
+    *,
+    provider: EmbeddingProvider,
+    source: str | None,
+    limit: int,
+    offset: int,
+    after: str | None,
+    before: str | None,
+) -> list[dict]:
+    """Semantic path: embed → KNN → aggregate to best chunk per conversation.
+
+    Over-fetches KNN candidates (limit*3 + offset + 50) so the per-conversation
+    deduplication still leaves enough hits to fill the requested page."""
+    if not q.strip():
+        return []
+    query_vector = provider.embed_query(q)
+    k = max(limit * 3 + offset + 50, 50)
+    hits = find_similar_chunks(
+        query_vector,
+        provider=provider.name, model=provider.model, k=k,
+        source=source, after=after, before=before,
+    )
+    if not hits:
+        return []
+    # One row per conversation: best chunk wins; hit_count counts the chunks
+    # that matched (so the UI can show "matched in N chunks").
+    by_conv: dict[int, dict] = {}
+    counts: dict[int, int] = {}
+    for h in hits:
+        cid = h["conversation_id"]
+        counts[cid] = counts.get(cid, 0) + 1
+        if cid not in by_conv or h["score"] > by_conv[cid]["score"]:
+            by_conv[cid] = h
+    ranked = sorted(by_conv.values(), key=lambda x: x["score"], reverse=True)
+    page = ranked[offset:offset + limit]
+    if not page:
+        return []
+    return _hydrate_semantic(page, counts)
+
+
+def _hydrate_semantic(hits: list[dict], counts: dict[int, int]) -> list[dict]:
+    """Add title/meta/role to KNN hits and shape them like keyword results."""
+    conn = connect()
+    cids = list({h["conversation_id"] for h in hits})
+    mids = list({h["message_id"] for h in hits})
+    ph_c = ",".join("?" * len(cids))
+    ph_m = ",".join("?" * len(mids))
+    conv = {r["id"]: r for r in conn.execute(
+        f"SELECT id, title, meta, created_at FROM conversations WHERE id IN ({ph_c})",
+        cids,
+    ).fetchall()}
+    msg = {r["id"]: r for r in conn.execute(
+        f"SELECT id, role FROM messages WHERE id IN ({ph_m})", mids,
+    ).fetchall()}
+    out: list[dict] = []
+    for h in hits:
+        cm = conv.get(h["conversation_id"])
+        mm = msg.get(h["message_id"])
+        if not cm or not mm:
+            # CASCADE deleted between the KNN call and hydration; skip rather
+            # than fabricating a result with missing fields.
+            continue
+        snip = h["text"]
+        if len(snip) > 200:
+            snip = snip[:200] + "…"
+        out.append({
+            "conversation_id": h["conversation_id"],
+            "source": h["source"],
+            "title": cm["title"],
+            "updated_at": h["updated_at"] or cm["created_at"],
+            "meta": json.loads(cm["meta"]),
+            "snippet": snip,
+            "role": mm["role"],
+            "message_id": h["message_id"],
+            "hit_count": counts.get(h["conversation_id"], 1),
+            "match_reason": "semantic",
+            "matched_keywords": [],
+            "semantic_score": h["score"],
+        })
+    return out
+
+
+def _search_hybrid(
+    q: str,
+    *,
+    provider: EmbeddingProvider,
+    source: str | None,
+    limit: int,
+    offset: int,
+    after: str | None,
+    before: str | None,
+) -> list[dict]:
+    """Hybrid path: RRF-fuse keyword and semantic rank lists.
+
+    Pages internally with a generous limit (limit*5, min 100) so the top of
+    the merged list is stable even when keyword and semantic agree on few
+    conversations. Pagination applies AFTER merging."""
+    internal = max(limit * 5, 100)
+    kw = _search_keyword(q, source=source, limit=internal, offset=0,
+                         after=after, before=before)
+    sem = _search_semantic(q, provider=provider, source=source,
+                           limit=internal, offset=0,
+                           after=after, before=before)
+    kw_rank = {r["conversation_id"]: i for i, r in enumerate(kw)}
+    sem_rank = {r["conversation_id"]: i for i, r in enumerate(sem)}
+    by_kw = {r["conversation_id"]: r for r in kw}
+    by_sem = {r["conversation_id"]: r for r in sem}
+    all_cids = set(kw_rank) | set(sem_rank)
+    if not all_cids:
+        return []
+    rrf: dict[int, float] = {}
+    for cid in all_cids:
+        s = 0.0
+        if cid in kw_rank:
+            s += 1.0 / (_RRF_K + kw_rank[cid] + 1)
+        if cid in sem_rank:
+            s += 1.0 / (_RRF_K + sem_rank[cid] + 1)
+        rrf[cid] = s
+    ranked = sorted(all_cids, key=lambda c: rrf[c], reverse=True)
+    page = ranked[offset:offset + limit]
+    out: list[dict] = []
+    for cid in page:
+        # Prefer the keyword row when present: its FTS snippet has [[…]]
+        # highlights the UI needs; the semantic row's snippet is just the
+        # chunk text. Pull semantic_score off the semantic row when there.
+        kr = by_kw.get(cid)
+        sr = by_sem.get(cid)
+        base = dict(kr) if kr else dict(sr)
+        if kr and sr:
+            base["match_reason"] = "both"
+            base["semantic_score"] = sr["semantic_score"]
+        # else: base already carries the correct match_reason / semantic_score
+        out.append(base)
+    return out
 
 
 def get_conversation(conv_id: int) -> dict | None:
