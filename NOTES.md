@@ -242,6 +242,23 @@
   通常運用では rechunk を呼ぶ必要はない。**rechunk が必要になるのは①既存 DB に chunks
   テーブルが migration v5 で追加された直後、② chunking_version を上げたとき**。
 
+## embeddings（P2-1b, 2026-06-25）
+
+- `embeddings` は chunks からの**派生データ**。`vector` は f32 little-endian の BLOB、
+  `dimension` を**列に持つ**ので read 時に provider を呼ばずに width が分かる。
+- `UNIQUE(chunk_id, provider, model)` で同一 chunk に複数 provider/model が共存可能
+  （A/B、移行期、外部 provider opt-in 用）。`only_missing=True` の embed_chunks は
+  この index でチェック、`only_missing=False` は `INSERT OR REPLACE` で in-place 更新。
+- e5 系モデルは **`"passage: ..."` / `"query: ..."` プレフィックスが必須**。
+  `LocalSbertProvider` 側で自動付与するので呼び出し側はモデル依存を意識しない。
+- `sentence-transformers` は **遅延 import**：モジュール import 時には触らず、
+  最初の `embed_passages` / `embed_query` で `SentenceTransformer(...)` を初期化。
+  テストは決定論的な `FixtureProvider`（SHA-256 → 8 次元正規化ベクトル）を使い、
+  CI/開発環境に sentence-transformers が無くてもグリーン。
+- P2-1b の `find_similar_chunks` は **pure Python cosine の全件走査**。
+  個人アーカイブ規模なら数万 chunks まで秒オーダー、P2-1c で sqlite-vec ／ numpy
+  fallback に差し替える前提（ADR-0001）。
+
 ## セキュリティレビューのメモ
 
 - Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。

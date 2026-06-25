@@ -12,6 +12,7 @@ import threading
 
 from . import redact
 from .chunking import CURRENT_CHUNKING_VERSION, chunk_text
+from .embedding import EmbeddingProvider, bytes_to_vector, cosine_similarity
 
 log = logging.getLogger("cairn.db")
 
@@ -134,6 +135,24 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_msg ON chunks(message_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
+
+-- Embeddings (P2-1b): one vector per (chunk, provider, model). Vectors live
+-- as f32 little-endian BLOBs; dimension is stored per row so a query knows
+-- the width without consulting the provider. Multiple provider/model rows
+-- per chunk are intentional (A/B and migration). Embeddings are derived data:
+-- droppable and regenerable from chunks via embed_chunks().
+CREATE TABLE IF NOT EXISTS embeddings (
+    id INTEGER PRIMARY KEY,
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dimension INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(chunk_id, provider, model)
+);
+CREATE INDEX IF NOT EXISTS idx_embeddings_chunk ON embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_provider_model ON embeddings(provider, model);
 """
 
 _MIGRATION_2_IMPORT_RUNS = """
@@ -207,12 +226,28 @@ CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
 """
 
-_SCHEMA_VERSION = 5
+_MIGRATION_6_EMBEDDINGS = """
+CREATE TABLE IF NOT EXISTS embeddings (
+    id INTEGER PRIMARY KEY,
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dimension INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(chunk_id, provider, model)
+);
+CREATE INDEX IF NOT EXISTS idx_embeddings_chunk ON embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_provider_model ON embeddings(provider, model);
+"""
+
+_SCHEMA_VERSION = 6
 _MIGRATIONS: list[tuple[int, str]] = [
     (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
     (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
     (4, _MIGRATION_4_ATTACHMENTS),       # add attachments table to pre-v4 DBs
     (5, _MIGRATION_5_CHUNKS),            # add chunks table to pre-v5 DBs (P2-1a)
+    (6, _MIGRATION_6_EMBEDDINGS),        # add embeddings table to pre-v6 DBs (P2-1b)
 ]
 
 
@@ -453,6 +488,135 @@ def rechunk_messages(
             stats["messages"] += 1
             stats["chunks"] += n
     return stats
+
+
+def embed_chunks(
+    provider: EmbeddingProvider,
+    *,
+    chunk_ids: list[int] | None = None,
+    only_missing: bool = True,
+    batch_size: int = 32,
+) -> dict:
+    """Generate embeddings for chunks using `provider`.
+
+    - `chunk_ids=None` covers every chunk; otherwise just the listed ids.
+    - `only_missing=True` (default) skips chunks that already have a row for
+      this (provider.name, provider.model). Set False to overwrite.
+    - `batch_size` is the embed-call batch width (the provider may batch
+      internally too; this caps memory + DB-row lots).
+
+    Returns {chunks, skipped}: chunks freshly embedded, chunks skipped as
+    already present at this (provider, model).
+    """
+    conn = connect()
+    stats = {"chunks": 0, "skipped": 0}
+    # Pick the chunk pool. We fetch text up front because the provider may run
+    # for seconds per batch — keeping the SELECT cursor open across that would
+    # hold a read transaction longer than needed.
+    if chunk_ids is None:
+        rows = conn.execute("SELECT id, text FROM chunks ORDER BY id").fetchall()
+    else:
+        rows = [
+            conn.execute("SELECT id, text FROM chunks WHERE id=?", (cid,)).fetchone()
+            for cid in chunk_ids
+        ]
+        rows = [r for r in rows if r is not None]
+
+    if only_missing:
+        # Filter to chunks with no row for this provider+model. A single SQL
+        # check per chunk keeps the logic simple; the index on
+        # embeddings(chunk_id) keeps it cheap.
+        kept = []
+        for row in rows:
+            has = conn.execute(
+                "SELECT 1 FROM embeddings WHERE chunk_id=? AND provider=? AND model=? LIMIT 1",
+                (row["id"], provider.name, provider.model),
+            ).fetchone()
+            if has:
+                stats["skipped"] += 1
+            else:
+                kept.append(row)
+        rows = kept
+
+    dimension = provider.dimension
+    now = utcnow_iso()
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        vectors = provider.embed_passages([r["text"] for r in batch])
+        with conn:
+            # INSERT OR REPLACE so only_missing=False (force-reembed) updates
+            # in place via the UNIQUE(chunk_id, provider, model) key.
+            conn.executemany(
+                "INSERT OR REPLACE INTO embeddings"
+                " (chunk_id, provider, model, dimension, vector, created_at)"
+                " VALUES (?,?,?,?,?,?)",
+                [
+                    (r["id"], provider.name, provider.model, dimension, v, now)
+                    for r, v in zip(batch, vectors)
+                ],
+            )
+        stats["chunks"] += len(batch)
+    return stats
+
+
+def find_similar_chunks(
+    query_vector: bytes,
+    *,
+    provider: str,
+    model: str,
+    k: int = 10,
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[dict]:
+    """Top-k chunks by cosine similarity for one (provider, model).
+
+    P2-1b prototype: pure-Python cosine over every matching row. Adequate for
+    a personal archive scale (tens of thousands of chunks) and intentionally
+    dependency-free; P2-1c replaces this path with a real vector index.
+
+    Filters narrow the candidate set *before* scoring, so source/date filters
+    cost the same as in keyword search. Returns dicts with chunk_id, message_id,
+    conversation_id, score, and the chunk text.
+    """
+    conn = connect()
+    q = bytes_to_vector(query_vector)
+    sql = (
+        "SELECT e.chunk_id, e.vector, e.dimension, "
+        "       ch.message_id, ch.conversation_id, ch.text, "
+        "       c.source, c.updated_at "
+        "FROM embeddings e "
+        "JOIN chunks ch ON ch.id = e.chunk_id "
+        "JOIN conversations c ON c.id = ch.conversation_id "
+        "WHERE e.provider=? AND e.model=?"
+    )
+    params: list = [provider, model]
+    if source:
+        sql += " AND c.source=?"; params.append(source)
+    if after:
+        sql += " AND c.updated_at >= ?"; params.append(after)
+    if before:
+        sql += " AND c.updated_at <= ?"; params.append(before)
+    rows = conn.execute(sql, params).fetchall()
+    scored: list[dict] = []
+    for row in rows:
+        # A row with a wrong-dimension vector can't be the same model, so
+        # something has stamped the wrong (provider, model) on it — skip
+        # rather than silently scoring garbage.
+        if row["dimension"] != len(q):
+            continue
+        score = cosine_similarity(q, bytes_to_vector(row["vector"]))
+        scored.append({
+            "chunk_id": row["chunk_id"],
+            "message_id": row["message_id"],
+            "conversation_id": row["conversation_id"],
+            "score": score,
+            "text": row["text"],
+            "source": row["source"],
+            "updated_at": row["updated_at"],
+        })
+    scored.sort(key=lambda r: r["score"], reverse=True)
+    return scored[:k]
 
 
 def record_import_run(
@@ -943,6 +1107,19 @@ def integrity_check() -> dict:
         checks["orphan_chunks"] = orphan_chunks
         if orphan_chunks:
             problems.append(f"{orphan_chunks} orphan chunks")
+
+    # 8. Orphan embeddings — only if the table exists (P2-1b not yet migrated).
+    has_embeddings = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='embeddings'"
+    ).fetchone()[0]
+    if has_embeddings:
+        orphan_embeddings = conn.execute(
+            "SELECT COUNT(*) FROM embeddings e "
+            "LEFT JOIN chunks ch ON ch.id = e.chunk_id WHERE ch.id IS NULL"
+        ).fetchone()[0]
+        checks["orphan_embeddings"] = orphan_embeddings
+        if orphan_embeddings:
+            problems.append(f"{orphan_embeddings} orphan embeddings")
 
     return {"ok": not problems, "checks": checks, "problems": problems}
 

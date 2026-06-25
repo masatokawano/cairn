@@ -24,6 +24,11 @@ Commands:
                  Default: only messages missing chunks at the current version.
                  --all forces regeneration (use after a chunking/redaction
                  change). Chunks are derived data, regenerable from messages.
+  reindex        (Re)generate embeddings for chunks (P2-1b). Default is
+                 --missing (skip chunks already embedded by this provider+
+                 model). --all overwrites. --provider/--model select the
+                 EmbeddingProvider (default: local-sbert with
+                 intfloat/multilingual-e5-small). Embeddings are derived data.
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -39,6 +44,7 @@ Usage:
                                                  [--after ISO] [--before ISO]
                                                  [--conversation-id N]
   .venv/bin/python -m app.admin rechunk [--all | --version-mismatched]
+  .venv/bin/python -m app.admin reindex [--provider P] [--model M] [--all | --missing]
 """
 from __future__ import annotations
 
@@ -256,6 +262,30 @@ def cmd_rechunk(args) -> int:
     return 0
 
 
+def _make_provider(name: str, model: str | None):
+    """Resolve a provider name (CLI string) to a concrete EmbeddingProvider.
+    Imports are lazy so we don't pull sentence-transformers when a different
+    provider is chosen (or when this function is only checking validity)."""
+    if name == "local-sbert":
+        from .embedding.local_sbert import DEFAULT_MODEL, LocalSbertProvider
+        return LocalSbertProvider(model=model or DEFAULT_MODEL)
+    raise SystemExit(f"unknown provider: {name!r} (known: local-sbert)")
+
+
+def cmd_reindex(args) -> int:
+    provider = _make_provider(args.provider, args.model)
+    stats = db.embed_chunks(provider, only_missing=not args.all)
+    # provider.dimension may load the model when it isn't in the static table;
+    # for the default e5-small it is, so this stays a metadata-only call.
+    print(json.dumps({
+        "provider": provider.name,
+        "model": provider.model,
+        "dimension": provider.dimension,
+        **stats,
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -292,6 +322,17 @@ def main(argv=None) -> int:
     g_rechunk.add_argument("--version-mismatched", action="store_true",
                            help="(default) chunk only messages missing the current version")
     p_rechunk.set_defaults(func=cmd_rechunk)
+    p_reindex = sub.add_parser("reindex")
+    p_reindex.add_argument("--provider", default="local-sbert",
+                           help="EmbeddingProvider name (default: local-sbert)")
+    p_reindex.add_argument("--model", default=None,
+                           help="provider-specific model id (default: provider's default)")
+    g_reindex = p_reindex.add_mutually_exclusive_group()
+    g_reindex.add_argument("--all", action="store_true",
+                           help="re-embed every chunk (overwrite existing rows for this provider+model)")
+    g_reindex.add_argument("--missing", action="store_true",
+                           help="(default) embed only chunks without a row for this provider+model")
+    p_reindex.set_defaults(func=cmd_reindex)
     args = parser.parse_args(argv)
     return args.func(args)
 

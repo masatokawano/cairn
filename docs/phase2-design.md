@@ -163,17 +163,21 @@ ROADMAP §5.3 の P2-1〜P2-5 を、垂直スライス（schema → repo functio
 - **受入**: 既存 99 tests pass + 新規。chunking_version=v1 で全 message 分の chunks が
   生成可能。chunks から元 message.text を offset で復元できる（overlap 部除く）。
 
-### P2-1b. EmbeddingProvider 抽象 + ローカル provider 実装
+### P2-1b. EmbeddingProvider 抽象 + ローカル provider 実装（実装済み）
 
 - schema: `embeddings` テーブル + migration v6
-- repo: `db.embed_chunks(chunk_ids=None, provider=...)` / `db.find_similar_chunks(vector, k, ...)`
+- repo: `db.embed_chunks(provider, chunk_ids=None, only_missing=True)` /
+  `db.find_similar_chunks(query_vector, provider, model, k, source/after/before)`
 - provider: `app/embedding/__init__.py` に `EmbeddingProvider` ABC、
-  `app/embedding/local_sbert.py`（or 同等の軽量ローカルモデル）を 1 実装。
+  `app/embedding/local_sbert.py`（`intfloat/multilingual-e5-small` を default、
+  passage/query プレフィックス自動付与、`sentence-transformers` は遅延 import）を 1 実装。
 - 外部 API provider は P2-1b では実装しない（インターフェースだけ用意して P2-1d で追加）。
-- CLI: `admin reindex [--provider X] [--model Y] [--all] [--missing]`
-- test: 小さい vector を fixture provider で生成、find_similar が cosine 上位を返す
-- **受入**: provider 1 つで全 chunks に embedding が付く、`cairn.db` 削除→再生成可能、
-  既存テストを壊さない。
+- find_similar は **pure Python cosine 全件走査**（P2-1c で sqlite-vec / numpy 経由に置換）。
+- CLI: `admin reindex [--provider X] [--model Y] [--all | --missing]`
+- test: 決定論的 FixtureProvider（SHA-256 由来の正規化ベクトル）で provider 抽象と
+  embed_chunks / find_similar_chunks を検証（`sentence-transformers` 不要）。
+- 受入: ✅ provider 1 つで全 chunks に embedding が付く、cosine 上位を返す、
+  cascade で chunk 削除と一緒に embedding も消える、orphan_embeddings を integrity_check が報告。
 
 ### P2-1c. vector index 実装（ADR-0001 に従う）
 
