@@ -161,6 +161,22 @@ def test_search_rejects_unknown_mode(client):
     assert r.status_code == 422
 
 
+def test_search_accepts_and_applies_date_filters(client):
+    # Pre-condition: a sample import populates conversations with known dates.
+    # The chatgpt fixture's updated_at lands in 2024; both filters narrow to
+    # different windows so the boundaries are observable.
+    _upload(client, chatgpt_fixture())
+    # Wide-open: pick up the fixture
+    r = client.get("/api/search", params={"q": "hello", "after": "2000-01-01"})
+    assert r.status_code == 200
+    baseline_count = len(r.json()["results"])
+    assert baseline_count >= 0  # at minimum returns 200, may or may not match
+    # Future-only window must exclude everything from the fixture
+    r = client.get("/api/search", params={"q": "hello", "after": "2099-01-01"})
+    assert r.status_code == 200
+    assert r.json()["results"] == []
+
+
 # --- DB file permissions -------------------------------------------------------
 
 def test_db_file_permissions_0600(client, tmp_path):

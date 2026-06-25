@@ -159,9 +159,14 @@ def search(
     limit: int = Query(50, le=200),
     offset: int = 0,
     mode: str = Query("keyword", pattern="^(keyword|semantic|hybrid)$"),
+    after: str | None = None,
+    before: str | None = None,
 ):
     try:
-        results = db.search(q, mode=mode, source=source, limit=limit, offset=offset)
+        results = db.search(
+            q, mode=mode, source=source, limit=limit, offset=offset,
+            after=after, before=before,
+        )
     except RuntimeError as exc:
         # The only RuntimeError db.search raises today is the "no embeddings
         # yet" path from _active_embedding_provider(). Turning it into a 400

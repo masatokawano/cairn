@@ -208,6 +208,41 @@ button:disabled {
   color: #fff;
 }
 
+.date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.date-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.date-label input[type='date'] {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.date-sep {
+  color: var(--muted);
+}
+
+.date-clear {
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 main {
   margin-top: 18px;
 }

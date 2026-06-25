@@ -137,6 +137,11 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<string | null>(null)
   const [mode, setMode] = useState<SearchMode>(loadMode)
+  // YYYY-MM-DD from <input type="date">; empty string = no filter. The
+  // backend compares against ISO8601 updated_at, so a date-only string
+  // works as both a lower and upper bound (lexicographic compare).
+  const [after, setAfter] = useState('')
+  const [before, setBefore] = useState('')
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [recent, setRecent] = useState<ConvSummary[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
@@ -169,7 +174,7 @@ export default function App() {
   }, [refreshStats, loadRecent])
 
   const runSearch = useCallback(
-    (q: string, src: string | null, m: SearchMode) => {
+    (q: string, src: string | null, m: SearchMode, a: string, b: string) => {
       if (!q.trim()) {
         setHits(null)
         loadRecent(src)
@@ -177,6 +182,11 @@ export default function App() {
       }
       const p = new URLSearchParams({ q, mode: m })
       if (src) p.set('source', src)
+      if (a) p.set('after', a)
+      // `before` from <input type="date"> is the start of that day. Pad to
+      // end-of-day so a user picking "2026-06-25" includes everything on
+      // that date, matching the MCP server's same convention.
+      if (b) p.set('before', `${b}T23:59:59Z`)
       api<{ results: SearchHit[] }>(`/api/search?${p}`)
         .then((d) => setHits(d.results))
         .catch((e: Error) => setNotice(`検索に失敗しました: ${e.message}`))
@@ -187,9 +197,9 @@ export default function App() {
   // Debounced live search
   useEffect(() => {
     window.clearTimeout(debounce.current)
-    debounce.current = window.setTimeout(() => runSearch(query, source, mode), 250)
+    debounce.current = window.setTimeout(() => runSearch(query, source, mode, after, before), 250)
     return () => window.clearTimeout(debounce.current)
-  }, [query, source, mode, runSearch])
+  }, [query, source, mode, after, before, runSearch])
 
   // Persist mode so a refresh doesn't reset to the default.
   useEffect(() => {
@@ -238,7 +248,7 @@ export default function App() {
     }
     setBusy(false)
     refreshStats()
-    runSearch(query, source, mode)
+    runSearch(query, source, mode, after, before)
   }
 
   type SyncResult = {
@@ -261,7 +271,7 @@ export default function App() {
     }
     setBusy(false)
     refreshStats()
-    runSearch(query, source, mode)
+    runSearch(query, source, mode, after, before)
   }
 
   const totalConvs = stats.reduce((a, s) => a + s.conversations, 0)
@@ -352,6 +362,36 @@ export default function App() {
             </button>
           )
         })}
+      </div>
+
+      <div className="date-row">
+        <label className="date-label">
+          期間
+          <input
+            type="date"
+            value={after}
+            onChange={(e) => setAfter(e.target.value)}
+            aria-label="開始日"
+          />
+          <span className="date-sep">〜</span>
+          <input
+            type="date"
+            value={before}
+            onChange={(e) => setBefore(e.target.value)}
+            aria-label="終了日"
+          />
+        </label>
+        {(after || before) && (
+          <button
+            className="date-clear"
+            onClick={() => {
+              setAfter('')
+              setBefore('')
+            }}
+          >
+            クリア
+          </button>
+        )}
       </div>
 
       <main>
