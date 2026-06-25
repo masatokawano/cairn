@@ -122,7 +122,12 @@ CREATE INDEX idx_embeddings_provider_model ON embeddings(provider, model);
 - vector 検索インデックスは ADR-0001 の決定に従う（sqlite-vec の virtual table を別に
   作るか、Python 側 cosine か）。
 
-### 3.3 chunking algorithm v1（提案）
+### 3.3 chunking algorithm v1（採用・実装済み）
+
+> 実装: `backend/app/chunking.py`。提案値（MAX_CHARS=1500 / OVERLAP=200 / paragraph
+> 境界優先）をそのまま採用し、`chunking_version = "v1-char1500-overlap200"`。
+> 短いメッセージの結合は v1 では行わず、空文字・空白のみの message は chunk 0 件。
+
 
 - 単位: **message が原則 1 chunk**。
 - ただし `len(message.text) > MAX_CHARS`（提案: 1500）のときは分割する。

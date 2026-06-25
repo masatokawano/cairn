@@ -228,6 +228,20 @@
 - 同時実行制御: ingest_lock（threading.Lock）を cli_sync に置き、バックグラウンド同期・
   /api/sync・/api/import で共有。/api/sync は非ブロッキング取得で実行中なら409。
 
+## chunking（P2-1a, 2026-06-25）
+
+- `chunks` は messages からの**派生データ**。`cairn.db` の chunks 行は削除しても
+  `admin rechunk --all` で復元できる前提で実装している。
+- `start_offset` / `end_offset` は元 message.text 上の char offset。**隣接 chunk は
+  OVERLAP 文字ぶん重なる**ため、全 chunk を offset で連結すると overlap 領域が二重に
+  出る。原文復元は「いずれか 1 chunk の text スライス」を使うこと。
+- `chunking_version` を**列に持つ**ことで algorithm 変更時に旧版を残したまま新版を
+  生成できる。`rechunk_messages(force=False)` は同一バージョンの再生成を skip し、
+  `force=True` は同一バージョン分のみを delete → 再 insert する（他バージョンは温存）。
+- `upsert_conversations` は message を再 insert（新 id）した後に自動 chunk するため、
+  通常運用では rechunk を呼ぶ必要はない。**rechunk が必要になるのは①既存 DB に chunks
+  テーブルが migration v5 で追加された直後、② chunking_version を上げたとき**。
+
 ## セキュリティレビューのメモ
 
 - Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。

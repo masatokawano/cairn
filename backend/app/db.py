@@ -11,6 +11,7 @@ import sqlite3
 import threading
 
 from . import redact
+from .chunking import CURRENT_CHUNKING_VERSION, chunk_text
 
 log = logging.getLogger("cairn.db")
 
@@ -110,6 +111,29 @@ CREATE TABLE IF NOT EXISTS import_runs (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
+
+-- Chunks (P2-1a): derived units of message text for semantic search. A message
+-- is one chunk unless it exceeds the chunking window, in which case it is split
+-- (see app/chunking.py). Each row records char offsets into the original
+-- message.text so the source span is recoverable. Chunks are derived data:
+-- droppable and regenerable from messages via rechunk_messages(). The
+-- chunking_version column lets a new algorithm's chunks coexist with the old
+-- during a staged re-generation.
+CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL,
+    end_offset INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'message_text',  -- "message_text" | "attachment_text"
+    chunking_version TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_msg ON chunks(message_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
 """
 
 _MIGRATION_2_IMPORT_RUNS = """
@@ -165,11 +189,30 @@ CREATE INDEX IF NOT EXISTS idx_attachments_conv ON attachments(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
 """
 
-_SCHEMA_VERSION = 4
+_MIGRATION_5_CHUNKS = """
+CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL,
+    end_offset INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'message_text',
+    chunking_version TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_msg ON chunks(message_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
+"""
+
+_SCHEMA_VERSION = 5
 _MIGRATIONS: list[tuple[int, str]] = [
     (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
     (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
     (4, _MIGRATION_4_ATTACHMENTS),       # add attachments table to pre-v4 DBs
+    (5, _MIGRATION_5_CHUNKS),            # add chunks table to pre-v5 DBs (P2-1a)
 ]
 
 
@@ -310,6 +353,11 @@ def upsert_conversations(parsed_list) -> dict:
                     (conv_id, i, m.role, m.text, m.created_at, m.source_message_id),
                 )
                 msg_ids.append(cur.lastrowid)
+                # Chunks are derived from the (already redacted) message text.
+                # Messages were freshly inserted (new ids), so no prior chunks
+                # exist for them — any old ones were CASCADE-deleted with the
+                # messages above. Generate at the current version.
+                _store_chunks(conn, cur.lastrowid, conv_id, m.text, CURRENT_CHUNKING_VERSION)
             attachment_rows = [
                 (conv_id, msg_ids[i], a.source_ref, a.mime, a.size, a.hash, a.extracted_text)
                 for i, m in enumerate(pc.messages)
@@ -328,6 +376,83 @@ def upsert_conversations(parsed_list) -> dict:
 def utcnow_iso() -> str:
     """Timestamp helper for import_runs (ISO8601, UTC)."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _store_chunks(
+    conn: sqlite3.Connection,
+    message_id: int,
+    conversation_id: int,
+    text: str,
+    chunking_version: str,
+) -> int:
+    """Chunk one message's text and insert the rows. Caller owns the transaction.
+    Returns the number of chunks stored (0 for empty/whitespace text)."""
+    chunks = chunk_text(text)
+    if not chunks:
+        return 0
+    now = utcnow_iso()
+    conn.executemany(
+        "INSERT INTO chunks"
+        " (message_id, conversation_id, idx, start_offset, end_offset, text, kind, chunking_version, created_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+            (message_id, conversation_id, c.idx, c.start_offset, c.end_offset,
+             c.text, "message_text", chunking_version, now)
+            for c in chunks
+        ],
+    )
+    return len(chunks)
+
+
+def rechunk_messages(
+    message_ids: list[int] | None = None,
+    *,
+    chunking_version: str | None = None,
+    force: bool = False,
+) -> dict:
+    """(Re)generate chunks for messages — the regenerable path for derived data.
+
+    - `message_ids=None` covers every message; otherwise just the listed ids.
+    - Messages that already have chunks at `chunking_version` are skipped unless
+      `force=True`, in which case their chunks at that version are replaced
+      (use after a chunking-algorithm or redaction-rule change).
+
+    Returns {messages, chunks, skipped}: messages (re)chunked, chunks written,
+    messages skipped as already current.
+    """
+    chunking_version = chunking_version or CURRENT_CHUNKING_VERSION
+    conn = connect()
+    stats = {"messages": 0, "chunks": 0, "skipped": 0}
+    with conn:
+        if message_ids is None:
+            rows = conn.execute(
+                "SELECT id, conversation_id, text FROM messages ORDER BY id"
+            ).fetchall()
+        else:
+            rows = [
+                conn.execute(
+                    "SELECT id, conversation_id, text FROM messages WHERE id=?", (mid,)
+                ).fetchone()
+                for mid in message_ids
+            ]
+            rows = [r for r in rows if r is not None]
+        for row in rows:
+            has = conn.execute(
+                "SELECT COUNT(*) FROM chunks WHERE message_id=? AND chunking_version=?",
+                (row["id"], chunking_version),
+            ).fetchone()[0]
+            if has and not force:
+                stats["skipped"] += 1
+                continue
+            if has:
+                conn.execute(
+                    "DELETE FROM chunks WHERE message_id=? AND chunking_version=?",
+                    (row["id"], chunking_version),
+                )
+            n = _store_chunks(conn, row["id"], row["conversation_id"], row["text"], chunking_version)
+            stats["messages"] += 1
+            stats["chunks"] += n
+    return stats
 
 
 def record_import_run(
@@ -805,6 +930,19 @@ def integrity_check() -> dict:
         checks["orphan_attachments"] = orphan_att
         if orphan_att:
             problems.append(f"{orphan_att} orphan attachments")
+
+    # 7. Orphan chunks — only if the table exists (P2-1a not yet migrated).
+    has_chunks = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chunks'"
+    ).fetchone()[0]
+    if has_chunks:
+        orphan_chunks = conn.execute(
+            "SELECT COUNT(*) FROM chunks ch "
+            "LEFT JOIN messages m ON m.id = ch.message_id WHERE m.id IS NULL"
+        ).fetchone()[0]
+        checks["orphan_chunks"] = orphan_chunks
+        if orphan_chunks:
+            problems.append(f"{orphan_chunks} orphan chunks")
 
     return {"ok": not problems, "checks": checks, "problems": problems}
 

@@ -78,8 +78,8 @@ def test_migration_v4_adds_attachments_to_pre_v4_db(db):
     conn.close()
     db._local.conn = None
 
-    conn = db.connect()  # reopen → migration v4 runs
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    conn = db.connect()  # reopen → migration v4 (and any later) runs
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     assert "attachments" in tables

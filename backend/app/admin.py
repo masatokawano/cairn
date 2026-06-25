@@ -20,6 +20,10 @@ Commands:
   export-markdown  Same filters as export-jsonl but renders human-readable
                  Markdown (one `# title` section per conversation, role
                  headings, `---` between conversations).
+  rechunk        (Re)generate semantic-search chunks from messages (P2-1a).
+                 Default: only messages missing chunks at the current version.
+                 --all forces regeneration (use after a chunking/redaction
+                 change). Chunks are derived data, regenerable from messages.
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -34,6 +38,7 @@ Usage:
   .venv/bin/python -m app.admin export-markdown [--out PATH] [--source S]
                                                  [--after ISO] [--before ISO]
                                                  [--conversation-id N]
+  .venv/bin/python -m app.admin rechunk [--all | --version-mismatched]
 """
 from __future__ import annotations
 
@@ -242,6 +247,15 @@ def cmd_export_markdown(args) -> int:
     return _run_export(db.export_markdown, args)
 
 
+def cmd_rechunk(args) -> int:
+    stats = db.rechunk_messages(force=args.all)
+    print(json.dumps(
+        {"chunking_version": db.CURRENT_CHUNKING_VERSION, **stats},
+        ensure_ascii=False, indent=2,
+    ))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -271,6 +285,13 @@ def main(argv=None) -> int:
     p_md = sub.add_parser("export-markdown")
     _add_export_filters(p_md)
     p_md.set_defaults(func=cmd_export_markdown)
+    p_rechunk = sub.add_parser("rechunk")
+    g_rechunk = p_rechunk.add_mutually_exclusive_group()
+    g_rechunk.add_argument("--all", action="store_true",
+                           help="regenerate chunks for every message at the current version")
+    g_rechunk.add_argument("--version-mismatched", action="store_true",
+                           help="(default) chunk only messages missing the current version")
+    p_rechunk.set_defaults(func=cmd_rechunk)
     args = parser.parse_args(argv)
     return args.func(args)
 
