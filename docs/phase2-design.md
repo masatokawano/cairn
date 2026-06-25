@@ -249,15 +249,29 @@ ROADMAP §5.3 の P2-1〜P2-5 を、垂直スライス（schema → repo functio
 - 受入: ✅ 3 mode を UI から切替可、結果に match_reason / semantic_score /
   matched_keywords が見える、`npm run build` 通過、`145 passed`。
 
-### P2-4. MCP 拡張
+### P2-4. MCP 拡張（実装済み）
 
-- `mcp__cairn__search_conversations(query, mode="hybrid")` のように mode 追加。
-- chunk_id range か message id range を返す。
-- 件数上限と出力サイズ制限は既存方針を維持。
-- **受入**: claude CLI 等から mode 引数を使え、既存呼び出し（mode 省略）は keyword
-  互換で動く（または既定値を hybrid に統一する場合は migration 期間を設けて告知）。
+- `mcp__cairn__search_conversations` に `mode="keyword"|"semantic"|"hybrid"`
+  パラメータを追加。**既定は `"keyword"`** で既存呼び出し非破壊。
+- 各結果に `match_reason` / `matched_keywords` / `semantic_score` / `message_id`
+  を追加。`message_id` で「該当 message にジャンプ」が成立。
+- 件数上限（10 hits）、snippet 500 char、body 8000 char の制限は維持。
+- `mode` 不正は `{"error": "invalid mode; ..."}`、embeddings 未生成での
+  `RuntimeError` も同じ shape の `{"error": "no embeddings exist; run admin reindex first..."}` に
+  変換（transport-level エラーにせず、LLM クライアントが原文をユーザーに伝えられる）。
+- 受入: ✅ claude CLI から mode 引数で呼べる、既存呼び出し（mode 省略）は keyword 互換、
+  151 passed（MCP 13 件: 既存 7 + 新規 6）。
 
 ---
+
+## 4.x Phase 2 受入基準（ROADMAP §5.4） — 全達成（2026-06-25）
+
+- ✅ 固有名詞は keyword 検索で正確に見つかる（FTS5 trigram、Phase 1 から維持）
+- ✅ 表現が異なる同一テーマは semantic/hybrid で見つかる（P2-1b〜P2-2、e5-small）
+- ✅ 検索結果から該当 message へ移動できる（API/MCP 共に `message_id` を返す）
+- ✅ Embedding を全削除して再生成できる（`admin reindex --all`、`rebuild-vector-index`）
+- ✅ provider 未設定でも従来検索が完全に動作する（`mode="keyword"` 既定）
+- ✅ 外部 API を使わないローカル構成が成立する（local-sbert + sqlite-vec/numpy）
 
 ## 5. 推奨実装順序
 
