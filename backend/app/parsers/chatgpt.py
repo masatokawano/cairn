@@ -6,17 +6,36 @@ order is recovered by walking parent links from the leaves (or sorting by
 create_time as a fallback). `content.parts` holds the text for normal
 messages; other content_types (code, multimodal_text, ...) are handled
 best-effort.
+
+Attachments (P1-J follow-up): the export carries them in two channels.
+- `content.parts[]` items with `asset_pointer = "file-service://file-XXX"`
+  resolve to `file-XXX.dat` inside the ZIP — bytes are present.
+- `metadata.attachments[]` carries UUID-keyed records whose bytes are NOT
+  exported; we keep them as metadata-only attachments.
+A sibling `conversation_asset_file_names.json` maps each `file-XXX.dat` to
+its original filename ("スクリーンショット ….png"); we use it for source_ref.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 from datetime import datetime, timezone
 
 from .base import (
-    ParseResult, ParsedConversation, ParsedMessage,
+    ParseResult, ParsedAttachment, ParsedConversation, ParsedMessage,
     fallback_source_id, make_title,
 )
 
 SOURCE = "chatgpt"
+
+# Tells the dispatcher to pass us the ZIP's binary entries plus the asset-
+# name lookup. Without these we'd still parse, just without bytes/filenames.
+WANTS_ATTACHMENTS = True
+
+# Asset pointers shaped "file-service://file-XXX" map 1:1 onto file-XXX.dat
+# inside the ZIP. Other prefixes (sediment://, https://) we don't have
+# bytes for and so record as metadata-only attachments.
+_FILE_SERVICE = "file-service://"
 
 
 def looks_like(data) -> bool:
@@ -82,7 +101,85 @@ def _ordered_nodes(mapping: dict, current_node: str | None) -> list[dict]:
     return nodes
 
 
-def parse(data) -> ParseResult:
+_EXT_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".gif": "image/gif", ".webp": "image/webp", ".heic": "image/heic",
+    ".pdf": "application/pdf",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+    ".mp4": "video/mp4", ".mov": "video/quicktime",
+}
+
+
+def _lookup_blob(attachments_map: dict[str, bytes] | None, dat_name: str) -> bytes | None:
+    """Resolve `file-XXX.dat` against the zip member dict. Newer ChatGPT
+    exports put .dat files at the archive root, so a direct hit is the
+    common case; the slash suffix check is a courtesy for archives that
+    nest them under a sub-prefix."""
+    if not attachments_map:
+        return None
+    if dat_name in attachments_map:
+        return attachments_map[dat_name]
+    for k, v in attachments_map.items():
+        if k.endswith("/" + dat_name):
+            return v
+    return None
+
+
+def _attachments_from_message(
+    msg: dict,
+    attachments_map: dict[str, bytes] | None,
+    asset_names: dict[str, str] | None,
+) -> list[ParsedAttachment]:
+    """Pull every attachment off one message.
+
+    Two sources are folded together (order: asset_pointers then
+    metadata.attachments[]) so a UI showing them in declaration order sees
+    images first, then files. We dedupe nothing here — the export occasionally
+    references the same asset_pointer twice in the mapping and we keep the
+    duplicate so message_id linkage stays 1:1 with the source.
+    """
+    out: list[ParsedAttachment] = []
+    content = msg.get("content") or {}
+    for part in (content.get("parts") or []):
+        if not isinstance(part, dict):
+            continue
+        ptr = part.get("asset_pointer")
+        if not isinstance(ptr, str) or not ptr.startswith(_FILE_SERVICE):
+            # audio (sediment://), real-time video container, etc. — we
+            # don't have bytes for these so skip rather than fabricate.
+            continue
+        file_id = ptr[len(_FILE_SERVICE):]
+        dat_name = f"{file_id}.dat"
+        data = _lookup_blob(attachments_map, dat_name)
+        friendly = (asset_names or {}).get(dat_name) or dat_name
+        ext = os.path.splitext(friendly)[1].lower()
+        mime = _EXT_MIME.get(ext)
+        out.append(ParsedAttachment(
+            source_ref=friendly,
+            mime=mime,
+            size=len(data) if data is not None else part.get("size_bytes"),
+            hash=hashlib.sha256(data).hexdigest() if data is not None else None,
+            data=data,
+        ))
+    for att in (msg.get("metadata") or {}).get("attachments") or []:
+        if not isinstance(att, dict):
+            continue
+        out.append(ParsedAttachment(
+            source_ref=att.get("name") or att.get("id"),
+            mime=att.get("mime_type") or att.get("mimeType"),
+            size=att.get("size"),
+            # No bytes shipped for this channel (UUID-keyed uploads) → no
+            # data/hash — the metadata row records "an upload happened" only.
+        ))
+    return out
+
+
+def parse(
+    data,
+    *,
+    attachments: dict[str, bytes] | None = None,
+    asset_names: dict[str, str] | None = None,
+) -> ParseResult:
     result = ParseResult()
     if not isinstance(data, list):
         result.warnings.append("chatgpt: top-level JSON is not a list")
@@ -104,7 +201,10 @@ def parse(data) -> ParseResult:
                 if (msg.get("metadata") or {}).get("is_visually_hidden_from_conversation"):
                     continue
                 text = _extract_text(msg.get("content") or {})
-                if not text:
+                msg_attachments = _attachments_from_message(msg, attachments, asset_names)
+                # A turn with no prose but a real attachment is still a turn
+                # (the user dropped a screenshot in and said nothing); keep it.
+                if not text and not msg_attachments:
                     continue
                 messages.append(
                     ParsedMessage(
@@ -112,6 +212,7 @@ def parse(data) -> ParseResult:
                         text=text,
                         created_at=_ts(msg.get("create_time")),
                         source_message_id=msg.get("id"),
+                        attachments=msg_attachments,
                     )
                 )
             if not messages:

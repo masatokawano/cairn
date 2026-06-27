@@ -137,12 +137,36 @@ def _parse_zip(raw: bytes) -> ParseResult:
         )
 
 
+def _load_chatgpt_asset_names(zf: zipfile.ZipFile) -> dict[str, str]:
+    """Optional sibling file mapping `file-XXX.dat` -> human filename.
+    Missing or malformed → empty dict; the parser falls back to dat_name."""
+    if "conversation_asset_file_names.json" not in zf.namelist():
+        return {}
+    try:
+        data = json.loads(_read_bounded(zf, "conversation_asset_file_names.json"))
+    except (FileTooLargeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _parse_chatgpt_shards(zf: zipfile.ZipFile, shards: list[str]) -> ParseResult:
     """Parse a multi-file ChatGPT export and merge shards into one ParseResult.
+
+    Attachment bytes (file-*.dat) and the friendly-name lookup are collected
+    once and shared across shards — the .dat pool is the same for every shard
+    in the same export, so re-reading it 13× would be wasted I/O.
 
     Each shard is parsed independently; a bad shard becomes a warning rather
     than failing the whole import, matching the parser-level tolerance the
     project uses elsewhere (NOTES: 壊れた行は warning にして skip)."""
+    attachments_map: dict[str, bytes] = {}
+    asset_names: dict[str, str] = {}
+    if getattr(chatgpt, "WANTS_ATTACHMENTS", False):
+        # exclude="" — we want to skip every .json in the archive, including
+        # the shards themselves; _collect_zip_attachments already filters JSON.
+        attachments_map = _collect_zip_attachments(zf, exclude="")
+        asset_names = _load_chatgpt_asset_names(zf)
+
     merged = ParseResult()
     for name in shards:
         try:
@@ -158,7 +182,7 @@ def _parse_chatgpt_shards(zf: zipfile.ZipFile, shards: list[str]) -> ParseResult
                 f"{name}: ChatGPT 形式と一致しません (shard を skip)"
             )
             continue
-        r = chatgpt.parse(data)
+        r = chatgpt.parse(data, attachments=attachments_map, asset_names=asset_names)
         merged.conversations.extend(r.conversations)
         merged.warnings.extend(r.warnings)
     return merged
@@ -169,10 +193,14 @@ def _parse_json_bytes(filename: str, raw: bytes,
     data = json.loads(raw)
     for parser in _CHAT_PARSERS:
         if parser.looks_like(data):
+            extra: dict = {}
             if zf is not None and getattr(parser, "WANTS_ATTACHMENTS", False):
-                attachments = _collect_zip_attachments(zf, exclude=filename)
-                return parser.parse(data, attachments=attachments)
-            return parser.parse(data)
+                extra["attachments"] = _collect_zip_attachments(zf, exclude=filename)
+                # chatgpt also wants the friendly-name lookup; gemini doesn't
+                # accept extra kwargs, so we gate by parser identity.
+                if parser is chatgpt:
+                    extra["asset_names"] = _load_chatgpt_asset_names(zf)
+            return parser.parse(data, **extra)
     raise UnknownFormatError(
         f"{filename}: ChatGPT / Claude / Gemini のいずれの形式とも一致しません"
     )

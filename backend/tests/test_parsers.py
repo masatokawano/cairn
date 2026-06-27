@@ -26,6 +26,151 @@ def test_chatgpt_parse():
     assert any("entry 2" in w for w in result.warnings)
 
 
+def test_chatgpt_asset_pointer_resolves_to_blob_and_friendly_name():
+    """`content.parts[].asset_pointer = "file-service://file-XXX"` must
+    resolve to `file-XXX.dat` in the supplied attachments map. The asset-
+    names sibling JSON, when present, supplies the friendly source_ref."""
+    payload = b"\x89PNG fake image bytes"
+    data = [{
+        "title": "with asset",
+        "create_time": 1700000000,
+        "update_time": 1700000100,
+        "mapping": {
+            "m1": {
+                "id": "m1", "parent": None,
+                "message": {
+                    "id": "m1", "author": {"role": "user"},
+                    "create_time": 1700000000,
+                    "content": {
+                        "content_type": "multimodal_text",
+                        "parts": [
+                            "ここの画像を見て",
+                            {
+                                "content_type": "image_asset_pointer",
+                                "asset_pointer": "file-service://file-ABCD1234",
+                                "size_bytes": len(payload),
+                                "width": 100, "height": 100,
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+        "current_node": "m1",
+    }]
+    result = chatgpt.parse(
+        data,
+        attachments={"file-ABCD1234.dat": payload},
+        asset_names={"file-ABCD1234.dat": "screenshot.png"},
+    )
+    assert len(result.conversations) == 1
+    msg = result.conversations[0].messages[0]
+    assert len(msg.attachments) == 1
+    a = msg.attachments[0]
+    assert a.source_ref == "screenshot.png"
+    assert a.mime == "image/png"  # derived from friendly extension
+    assert a.size == len(payload)
+    assert a.data == payload
+    import hashlib
+    assert a.hash == hashlib.sha256(payload).hexdigest()
+
+
+def test_chatgpt_asset_pointer_without_bytes_records_metadata_only():
+    """The .dat may be missing (truncated export, sediment:// audio, etc.).
+    Bytes absent → ParsedAttachment with no data/hash but still recorded so
+    the conversation history reflects "an image was shared here"."""
+    data = [{
+        "title": "missing blob",
+        "create_time": 1700000000,
+        "mapping": {
+            "m1": {
+                "id": "m1", "parent": None,
+                "message": {
+                    "id": "m1", "author": {"role": "user"},
+                    "create_time": 1700000000,
+                    "content": {
+                        "content_type": "multimodal_text",
+                        "parts": [{
+                            "content_type": "image_asset_pointer",
+                            "asset_pointer": "file-service://file-MISSING",
+                            "size_bytes": 1234,
+                        }],
+                    },
+                },
+            },
+        },
+        "current_node": "m1",
+    }]
+    result = chatgpt.parse(data, attachments={}, asset_names={})
+    a = result.conversations[0].messages[0].attachments[0]
+    assert a.source_ref == "file-MISSING.dat"  # falls back to dat name
+    assert a.data is None
+    assert a.hash is None
+    # size_bytes from the pointer is the only width we have when bytes are gone
+    assert a.size == 1234
+
+
+def test_chatgpt_metadata_attachments_recorded_without_bytes():
+    """The UUID-keyed metadata.attachments[] never has bytes in the export;
+    we still record name/size/mime so the UI can mention "an upload happened"."""
+    data = [{
+        "mapping": {
+            "m1": {
+                "id": "m1", "parent": None,
+                "message": {
+                    "id": "m1", "author": {"role": "user"},
+                    "create_time": 1700000000,
+                    "content": {"content_type": "text", "parts": ["みて"]},
+                    "metadata": {
+                        "attachments": [
+                            {"id": "uuid-of-the-upload", "name": "data.xlsx",
+                             "size": 53763, "mime_type": "application/vnd.openxmlformats"},
+                        ],
+                    },
+                },
+            },
+        },
+        "current_node": "m1",
+    }]
+    result = chatgpt.parse(data)
+    atts = result.conversations[0].messages[0].attachments
+    assert len(atts) == 1
+    a = atts[0]
+    assert a.source_ref == "data.xlsx"
+    assert a.size == 53763
+    assert a.mime == "application/vnd.openxmlformats"
+    assert a.data is None  # bytes never shipped for this channel
+
+
+def test_chatgpt_attachment_only_message_is_preserved():
+    """A turn with no prose but an image attached is a real turn — image-only
+    messages used to be dropped because `if not text: continue` ran before
+    attachment processing."""
+    data = [{
+        "mapping": {
+            "m1": {
+                "id": "m1", "parent": None,
+                "message": {
+                    "id": "m1", "author": {"role": "user"},
+                    "create_time": 1700000000,
+                    "content": {
+                        "content_type": "multimodal_text",
+                        "parts": [{
+                            "content_type": "image_asset_pointer",
+                            "asset_pointer": "file-service://file-XYZ",
+                        }],
+                    },
+                },
+            },
+        },
+        "current_node": "m1",
+    }]
+    result = chatgpt.parse(data, attachments={"file-XYZ.dat": b"img"})
+    msg = result.conversations[0].messages[0]
+    assert msg.text == ""
+    assert len(msg.attachments) == 1
+
+
 def test_chatgpt_fallback_source_id_is_stable_across_reorders():
     """When the export lacks a stable id, the fallback must be deterministic
     on the conversation's content (not its position). A user re-exporting
@@ -304,6 +449,56 @@ def test_parse_upload_zip():
         zf.writestr("conversations.json", load("chatgpt_sample.json"))
     result = parse_upload("export.zip", buf.getvalue())
     assert result.conversations[0].source == "chatgpt"
+
+
+def test_parse_upload_chatgpt_shards_threads_dat_files_into_attachments():
+    """End-to-end: a multi-shard zip with file-*.dat blobs and the friendly-
+    name map must surface as ParsedAttachments with bytes filled in. This is
+    the path the real ChatGPT export takes — single-file legacy exports rarely
+    carry .dat files at all."""
+    import hashlib
+    import io
+    import json as _json
+    import zipfile
+
+    payload = b"\x89PNG\r\n\x1a\n fake image"
+    shard = _json.dumps([{
+        "title": "shard hit",
+        "create_time": 1700000000,
+        "mapping": {
+            "m1": {
+                "id": "m1", "parent": None,
+                "message": {
+                    "id": "m1", "author": {"role": "user"},
+                    "create_time": 1700000000,
+                    "content": {
+                        "content_type": "multimodal_text",
+                        "parts": [{
+                            "content_type": "image_asset_pointer",
+                            "asset_pointer": "file-service://file-SHARDED",
+                            "size_bytes": len(payload),
+                        }],
+                    },
+                },
+            },
+        },
+        "current_node": "m1",
+    }])
+    asset_names = _json.dumps({"file-SHARDED.dat": "snapshot.png"})
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("conversations-000.json", shard)
+        zf.writestr("conversation_asset_file_names.json", asset_names)
+        zf.writestr("file-SHARDED.dat", payload)
+
+    result = parse_upload("export.zip", buf.getvalue())
+    assert len(result.conversations) == 1
+    msg = result.conversations[0].messages[0]
+    assert len(msg.attachments) == 1
+    a = msg.attachments[0]
+    assert a.source_ref == "snapshot.png"
+    assert a.data == payload
+    assert a.hash == hashlib.sha256(payload).hexdigest()
 
 
 def test_parse_upload_chatgpt_multi_shard_zip():
