@@ -96,7 +96,7 @@ npm audit
 
 cd ../backend
 .venv/bin/python -m pip check
-uvx pip-audit -r requirements.lock --no-deps --disable-pip   # 既知脆弱性監査
+.venv/bin/python -m app.admin audit-deps                     # 既知脆弱性監査（pip-audit ラッパー、CI で exit code を見れる）
 ls -l data/                                                  # cairn.db* が 0600 (-rw-------) であること
 ```
 

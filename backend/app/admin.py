@@ -34,6 +34,11 @@ Commands:
                  the embeddings table. Use after switching models (different
                  dimension), restoring a backup, or to clear orphans flagged
                  by integrity-check. No-op when the numpy fallback is active.
+  audit-deps     Run pip-audit against backend/requirements.lock (known
+                 vulnerabilities). Uses `uvx pip-audit --no-deps --disable-pip`
+                 to skip the inner venv that SIGABRTs on some macOS installs.
+                 Exits 2 (or pip-audit's own non-zero) when a vulnerability
+                 is reported; suitable for CI gating.
 
 Usage:
   .venv/bin/python -m app.admin redact-scan
@@ -51,12 +56,14 @@ Usage:
   .venv/bin/python -m app.admin rechunk [--all | --version-mismatched]
   .venv/bin/python -m app.admin reindex [--provider P] [--model M] [--all | --missing]
   .venv/bin/python -m app.admin rebuild-vector-index
+  .venv/bin/python -m app.admin audit-deps
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from . import db, redact
@@ -300,6 +307,34 @@ def cmd_rebuild_vector_index(_args) -> int:
     return 0
 
 
+# Module-level constants so the test can monkeypatch the invocation without
+# duplicating the command list.
+AUDIT_DEPS_LOCKFILE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "requirements.lock")
+)
+AUDIT_DEPS_CMD = [
+    "uvx", "pip-audit", "-r", AUDIT_DEPS_LOCKFILE, "--no-deps", "--disable-pip",
+]
+
+
+def cmd_audit_deps(_args) -> int:
+    """Run pip-audit against requirements.lock and return its exit code.
+    `--no-deps --disable-pip` avoids the inner venv that SIGABRTs on some
+    macOS installs (see NOTES.md). uvx is required; if it's missing we
+    surface a clear hint instead of a stack trace."""
+    print(f"$ {' '.join(AUDIT_DEPS_CMD)}", file=sys.stderr)
+    try:
+        proc = subprocess.run(AUDIT_DEPS_CMD, check=False)
+    except FileNotFoundError:
+        print(
+            "uvx not found. Install uv (https://docs.astral.sh/uv/) or run "
+            "pip-audit -r requirements.lock --no-deps --disable-pip directly.",
+            file=sys.stderr,
+        )
+        return 127
+    return proc.returncode
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="cairn-admin", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -348,6 +383,7 @@ def main(argv=None) -> int:
                            help="(default) embed only chunks without a row for this provider+model")
     p_reindex.set_defaults(func=cmd_reindex)
     sub.add_parser("rebuild-vector-index").set_defaults(func=cmd_rebuild_vector_index)
+    sub.add_parser("audit-deps").set_defaults(func=cmd_audit_deps)
     args = parser.parse_args(argv)
     return args.func(args)
 
