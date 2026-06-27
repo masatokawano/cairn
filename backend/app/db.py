@@ -419,6 +419,22 @@ def upsert_conversations(parsed_list) -> dict:
                     " VALUES (?,?,?,?,?,?,?)",
                     attachment_rows,
                 )
+            # Blob store side (P1-J): persist the bytes for any attachment
+            # whose parser captured them. Lazy-imported to side-step the
+            # db ↔ attachments module cycle. The hash returned matches what
+            # the parser already computed (assertion below is defensive —
+            # a mismatch means the parser hashed the wrong bytes).
+            for m in pc.messages:
+                for a in m.attachments:
+                    if a.data is None:
+                        continue
+                    from . import attachments as _store
+                    stored_hash = _store.store(a.data)
+                    if a.hash is not None and stored_hash != a.hash:
+                        log.warning(
+                            "attachment hash mismatch: parser=%s store=%s — keeping parser hash",
+                            a.hash, stored_hash,
+                        )
     return stats
 
 
@@ -1412,6 +1428,30 @@ def integrity_check() -> dict:
         checks["orphan_embeddings"] = orphan_embeddings
         if orphan_embeddings:
             problems.append(f"{orphan_embeddings} orphan embeddings")
+
+    # 8b. Attachment blob store (P1-J): compare hashes in the attachments
+    # table against bytes on disk. Two failure modes worth surfacing:
+    # (a) a row references a hash whose file is missing — bytes lost or
+    #     never stored
+    # (b) the store has a blob no row references — orphan, safe to GC
+    # Neither is appended to `problems`: missing blobs may be intentional
+    # (metadata-only sources like Claude UUID refs), and orphans waste disk
+    # but don't corrupt search.
+    if has_attachments:
+        from . import attachments as _store
+        attached_hashes = {
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT hash FROM attachments WHERE hash IS NOT NULL"
+            ).fetchall()
+        }
+        on_disk = set(_store.iter_hashes())
+        checks["attachment_blobs_on_disk"] = len(on_disk)
+        checks["attachment_blobs_missing"] = sum(
+            1 for h in attached_hashes if h not in on_disk
+        )
+        checks["attachment_blobs_orphan"] = sum(
+            1 for h in on_disk if h not in attached_hashes
+        )
 
     # 9. Orphan vector-index rows — vec0 doesn't honour FK cascade, so chunks
     # deleted via cascade can leave stale rows behind. Reported as info, not

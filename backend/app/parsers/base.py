@@ -18,17 +18,25 @@ PARSER_VERSION = "1"
 
 @dataclass
 class ParsedAttachment:
-    """File attached to a message (P1-H). Metadata only — Cairn does not
-    store the bytes. `hash` is sha256 of the raw decoded bytes (so the same
-    file referenced twice dedups by hash, and an in-place edit is detected
-    by the diff importer). `source_ref` is None for inline-embedded (base64)
-    attachments since there is no path to point at; `extracted_text` is
-    reserved for future OCR / PDF text extraction passes."""
+    """File attached to a message. `hash` is sha256 of the raw decoded bytes
+    (so the same file referenced twice dedups by hash, and an in-place edit
+    is detected by the diff importer). `source_ref` is None for inline-
+    embedded (base64) attachments since there is no path to point at;
+    `extracted_text` is reserved for future OCR / PDF text extraction passes.
+
+    `data` (P1-J): the raw bytes when the parser has them — gemini Takeout
+    images, ChatGPT `file-*.dat` blobs. db.upsert_conversations stores
+    these in the filesystem blob store keyed by hash; the field is dropped
+    from memory before the row is written, so it adds no DB bloat. For
+    metadata-only attachments (e.g. Claude's UUID-only references) `data`
+    stays None and only the metadata persists.
+    """
     source_ref: str | None = None
     mime: str | None = None
     size: int | None = None
     hash: str | None = None
     extracted_text: str | None = None
+    data: bytes | None = None
 
 
 @dataclass

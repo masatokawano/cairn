@@ -190,6 +190,7 @@ def _make_attachment(ref: str, attachments_map: dict | None) -> ParsedAttachment
         mime=mime,
         size=len(data) if data is not None else None,
         hash=hashlib.sha256(data).hexdigest() if data is not None else None,
+        data=data,  # picked up by db.upsert_conversations → attachments.store()
     )
 
 

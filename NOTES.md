@@ -311,6 +311,29 @@
 - API 側は `pattern="^(keyword|semantic|hybrid)$"` で 422 検証し、typo がサイレントに
   既定 mode へフォールバックしないようにした。
 
+## 添付バイナリの blob store（P1-J, 2026-06-27）
+
+- 添付の bytes 本体は `data/attachments/{hash[:2]}/{hash}` に sharded で保存。
+  hash をファイル名そのものに使っているので**同一バイト列は自然に重複排除**される。
+  schema 列での pointer 管理は不要（drift しがちなので避けた）。
+- 書き込みは `{target}.tmp` への書き出し → `os.replace` で atomic。途中で死んでも
+  半端な blob が完成済みファイルを名乗ることがない。
+- `ParsedAttachment.data: bytes | None` を新設。bytes を持っているパーサー
+  （現状 gemini Takeout）はここに乗せ、`db.upsert_conversations` が `attachments.store()`
+  を呼んで永続化する。**メタデータのみのソース（Claude の UUID 参照等）は `data=None`** の
+  ままで blob は作らない。
+- パーミッションは DB と同じ 0600（読み出しは現所有者のみ）。
+- `db.integrity_check()` に `attachment_blobs_missing`（attachments 行は hash を持つが
+  ファイル無し）と `attachment_blobs_orphan`（ファイル有りだが誰も参照していない）を追加。
+  どちらも problems には積まない（前者はメタデータ専用ソースで正常、後者は GC 余地）。
+- **`admin backup` は現状 cairn.db のみコピー**で attachments/ 配下は対象外。完全バックアップ
+  には `cp -R data/attachments/` も別途必要。blob 込みの backup は別タスク扱い
+  （blob は GB 級になり得るため、毎回コピーは望ましくない場合がある）。
+- chatgpt 実 export の `file-*.dat`（アップロード添付バイナリ）取り込みは未対応。
+  `content.parts[].asset_pointer = "file-service://file-XXX"` を辿って `file-XXX.dat` を
+  解決する経路が必要で、別コミットで実装する（添付モデルが UUID 形式と混在しているため
+  慎重に）。
+
 ## セキュリティレビューのメモ
 
 - Cairn は認証なし API なので、`--host 0.0.0.0` 起動は会話本文をLANに露出し得る。

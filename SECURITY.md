@@ -100,6 +100,19 @@ cd ../backend
 ls -l data/                                                  # cairn.db* が 0600 (-rw-------) であること
 ```
 
+## 添付 blob store（P1-J）
+
+- `data/attachments/{hash[:2]}/{hash}` に添付の生バイトを保存。各ファイルは
+  作成時に **0600** に設定（DB と同じパーミッション規約）。
+- blob は redact 対象ではない（テキストの redact は messages.text に対して
+  だけ行われる）。**画像・PDF 等のバイナリは取り込み時の内容のまま保存される**。
+  redact 検査を通したい場合は OCR/PDF 抽出を `extracted_text` 列に入れる
+  ことになるが、それは別タスク（attached blob text extraction）。
+- バックアップ: `admin backup` は **cairn.db のみコピー**で attachments/ 配下は
+  対象外。完全な離脱コピーには `cp -R data/attachments/` を別途実行する必要あり。
+- 整合性: `admin integrity-check` が `attachment_blobs_missing` / `_orphan` を
+  カウントし、テーブルと disk の drift を可視化。
+
 ## SQLite 拡張ロード（sqlite-vec, P2-1c）
 
 - `db.connect()` が `sqlite_vec` ロードのために `enable_load_extension(True)` を一時的に
