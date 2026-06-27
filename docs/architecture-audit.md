@@ -179,7 +179,9 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
 - **残課題**: claude の実エクスポートは検証済み（2026-06-24、`uuid` ベースの
   source_message_id が全 5698 メッセージで埋まり、warnings 0）。gemini も実 Takeout
   で検証済み（2026-06-24、source_id は `time-sha256(time|title_raw)[:16]` で内容由来、
-  message レベルの安定 ID は無し）。chatgpt は未検証。codex の message ID はローカル
+  message レベルの安定 ID は無し）。**chatgpt も実 export で検証済み**（2026-06-27、
+  1226 会話 / 15245 messages、shards 13 個構成の export で warnings 0、source_id
+  重複 0、fallback 0）。codex の message ID はローカル
   ログに安定 ID が乏しく未対応。**fallback の順序非依存化は対応済み**: chatgpt /
   claude_export の `index-{i}` を `fallback-{sha256(title|created_at|first_text)[:16]}`
   に変更（`parsers/base.py::fallback_source_id`）。これにより export の listing 順序が

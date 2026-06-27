@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import zipfile
 
 from . import chatgpt, claude_export, gemini
@@ -22,6 +23,9 @@ MAX_ZIP_ENTRIES = int(os.environ.get("CAIRN_MAX_ZIP_ENTRIES", "10000"))
 # Per-attachment size when reading bytes from the surrounding ZIP for
 # parsers that opt in via WANTS_ATTACHMENTS (currently: gemini Takeout).
 MAX_ATTACHMENT_BYTES = int(os.environ.get("CAIRN_MAX_ATTACHMENT_MB", "50")) * 1024 * 1024
+
+
+_CHATGPT_SHARD = re.compile(r"(^|/)conversations-\d+\.json$")
 
 
 class UnknownFormatError(Exception):
@@ -83,6 +87,17 @@ def _parse_zip(raw: bytes) -> ParseResult:
             raise FileTooLargeError(
                 f"ZIP内のファイル数 ({len(names)}) が上限 ({MAX_ZIP_ENTRIES}) を超えています"
             )
+        # Modern ChatGPT exports for large accounts split conversations across
+        # conversations-000.json, conversations-001.json, ... — handle them
+        # before the single-file fallback so we don't pick one and miss the
+        # rest. Each shard has the same JSON shape (a flat list) as the
+        # legacy single conversations.json.
+        shards = sorted(
+            n for n in names
+            if _CHATGPT_SHARD.search(n) and not n.startswith("__MACOSX")
+        )
+        if shards:
+            return _parse_chatgpt_shards(zf, shards)
         candidates = [
             n for n in names
             if n.endswith(".json") and not n.startswith("__MACOSX")
@@ -120,6 +135,33 @@ def _parse_zip(raw: bytes) -> ParseResult:
         raise UnknownFormatError(
             "ZIP内に認識できるJSONがありません: " + "; ".join(errors[:5])
         )
+
+
+def _parse_chatgpt_shards(zf: zipfile.ZipFile, shards: list[str]) -> ParseResult:
+    """Parse a multi-file ChatGPT export and merge shards into one ParseResult.
+
+    Each shard is parsed independently; a bad shard becomes a warning rather
+    than failing the whole import, matching the parser-level tolerance the
+    project uses elsewhere (NOTES: 壊れた行は warning にして skip)."""
+    merged = ParseResult()
+    for name in shards:
+        try:
+            data = json.loads(_read_bounded(zf, name))
+        except FileTooLargeError as exc:
+            merged.warnings.append(f"{name}: {exc}")
+            continue
+        except json.JSONDecodeError as exc:
+            merged.warnings.append(f"{name}: invalid JSON ({exc})")
+            continue
+        if not chatgpt.looks_like(data):
+            merged.warnings.append(
+                f"{name}: ChatGPT 形式と一致しません (shard を skip)"
+            )
+            continue
+        r = chatgpt.parse(data)
+        merged.conversations.extend(r.conversations)
+        merged.warnings.extend(r.warnings)
+    return merged
 
 
 def _parse_json_bytes(filename: str, raw: bytes,

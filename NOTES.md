@@ -61,7 +61,19 @@
 - `create_time` はUNIXエポック秒（float）。ISO文字列に変換して保存。
 - `content.content_type` は `text` 以外に `code`, `multimodal_text`,
   `user_editable_context`（カスタム指示 → 除外）などがある。
-- ※実エクスポートでの検証はまだ。実ファイルを入手したら要確認。
+- **大口アカウントの export は複数ファイルに分割**される（2026-06-27 検証）:
+  `conversations-000.json` 〜 `conversations-NNN.json`（実検証時は 13 shards =
+  約 110MB の JSON、~530MB の zip に同梱）。`parsers/__init__.py` が
+  `_CHATGPT_SHARD` 正規表現で shards を検出し、`_parse_chatgpt_shards` で順番に
+  parse → 結合する。**小規模アカウントは従来通り `conversations.json` 単一**で、
+  そちらの経路は変更なし。
+- 実 export（1226 会話 / 15245 メッセージ）で warnings 0、source_id 重複 0、
+  fallback 0（全 conversation に `conversation_id` あり）を確認。
+- **zip の総サイズが `CAIRN_MAX_UPLOAD_MB` (既定 500MB) を超える場合**は環境変数で
+  引き上げる必要あり。conversations-NNN.json だけ抜き出した小 zip を再 import する
+  方法もあるが、実用上は環境変数のほうが楽。
+- `chat.html` (~90MB の HTML レンダ) と `file-*.dat` (添付実体) は parser が読まない
+  （ZIP 容量の大部分はこれ）。attachments 対応は別タスク（attached blob store）。
 
 ## Claude エクスポート (conversations.json)
 

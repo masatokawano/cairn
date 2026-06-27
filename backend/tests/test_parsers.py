@@ -306,6 +306,45 @@ def test_parse_upload_zip():
     assert result.conversations[0].source == "chatgpt"
 
 
+def test_parse_upload_chatgpt_multi_shard_zip():
+    """Real ChatGPT exports for large accounts come as conversations-000.json
+    through conversations-NNN.json — Cairn must read ALL shards, not just
+    the first one it happens to pick."""
+    import io
+    import zipfile
+
+    raw = load("chatgpt_sample.json")
+    # The fixture has 1 valid + 1 empty + 1 bad entry. Two shards × 1 valid
+    # convo each = 2 conversations merged; warnings from bad entries are
+    # accumulated across shards (1 warning per shard → 2 total).
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("conversations-000.json", raw)
+        zf.writestr("conversations-001.json", raw)
+        # decoy: must not pollute results despite the similar name
+        zf.writestr("conversation_asset_file_names.json", "{}")
+    result = parse_upload("export.zip", buf.getvalue())
+    assert len(result.conversations) == 2
+    assert all(c.source == "chatgpt" for c in result.conversations)
+    assert len(result.warnings) >= 2  # at least one per shard from the bad entry
+
+
+def test_parse_upload_chatgpt_multi_shard_bad_shard_warns_not_fails():
+    """One broken shard must not kill the whole import — match the existing
+    tolerance the parsers themselves apply at the entry level."""
+    import io
+    import zipfile
+
+    raw = load("chatgpt_sample.json")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("conversations-000.json", raw)
+        zf.writestr("conversations-001.json", b"{not valid json")
+    result = parse_upload("export.zip", buf.getvalue())
+    assert len(result.conversations) == 1  # the good shard survived
+    assert any("conversations-001.json" in w for w in result.warnings)
+
+
 def test_parse_upload_unknown_format():
     import pytest
 
