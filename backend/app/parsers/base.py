@@ -77,3 +77,23 @@ def make_title(text: str, limit: int = 60) -> str:
     """Derive a title from the first line of a message."""
     line = text.strip().splitlines()[0] if text.strip() else "(untitled)"
     return line[:limit] + ("…" if len(line) > limit else "")
+
+
+def fallback_source_id(messages: list[ParsedMessage], title: str | None = None,
+                       created_at: str | None = None) -> str:
+    """Stable synthetic source_id for export entries that lack a real uuid/id.
+
+    Earlier code used `f"index-{i}"` which made the id depend on the file's
+    listing order; a re-exported file with a different order would create
+    duplicate conversation rows on the next import. Instead we hash the
+    conversation's content (title + created_at + first message text), so the
+    same conversation deterministically gets the same id across re-exports
+    while two genuinely-different conversations almost never collide.
+
+    Distinguished by the "fallback-" prefix from any real id format we've
+    seen in exports — important for debugging "where did this id come from?".
+    """
+    first_text = messages[0].text if messages else ""
+    payload = json.dumps([title or "", created_at or "", first_text], ensure_ascii=False)
+    h = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"fallback-{h[:16]}"

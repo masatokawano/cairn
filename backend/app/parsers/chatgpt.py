@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .base import ParseResult, ParsedConversation, ParsedMessage, make_title
+from .base import (
+    ParseResult, ParsedConversation, ParsedMessage,
+    fallback_source_id, make_title,
+)
 
 SOURCE = "chatgpt"
 
@@ -113,7 +116,9 @@ def parse(data) -> ParseResult:
                 )
             if not messages:
                 continue
-            source_id = conv.get("conversation_id") or conv.get("id") or f"index-{i}"
+            source_id = conv.get("conversation_id") or conv.get("id") or fallback_source_id(
+                messages, conv.get("title"), _ts(conv.get("create_time")),
+            )
             result.conversations.append(
                 ParsedConversation(
                     source=SOURCE,

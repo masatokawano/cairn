@@ -180,7 +180,10 @@ API/CLI → test → docs）」で実装する。原則 **1 セッション 1 �
   source_message_id が全 5698 メッセージで埋まり、warnings 0）。gemini も実 Takeout
   で検証済み（2026-06-24、source_id は `time-sha256(time|title_raw)[:16]` で内容由来、
   message レベルの安定 ID は無し）。chatgpt は未検証。codex の message ID はローカル
-  ログに安定 ID が乏しく未対応。fallback の順序非依存化は将来課題（実益小）。
+  ログに安定 ID が乏しく未対応。**fallback の順序非依存化は対応済み**: chatgpt /
+  claude_export の `index-{i}` を `fallback-{sha256(title|created_at|first_text)[:16]}`
+  に変更（`parsers/base.py::fallback_source_id`）。これにより export の listing 順序が
+  変わっても同一会話は同一 source_id を保つ。
 
 ### P1-D. integrity-check（admin CLI）— ✅ 実装済み（2026-06-22）
 - **現状**: 完了。`db.integrity_check()`（読み取り専用、`{ok, checks, problems}` を返す）

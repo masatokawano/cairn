@@ -26,6 +26,36 @@ def test_chatgpt_parse():
     assert any("entry 2" in w for w in result.warnings)
 
 
+def test_chatgpt_fallback_source_id_is_stable_across_reorders():
+    """When the export lacks a stable id, the fallback must be deterministic
+    on the conversation's content (not its position). A user re-exporting
+    after the listing changed must not get duplicate rows."""
+    base = [{
+        "title": "without id",
+        "create_time": 1700000000,
+        "update_time": 1700000100,
+        "mapping": {
+            "m1": {
+                "id": "m1", "parent": None,
+                "message": {
+                    "id": "m1", "author": {"role": "user"},
+                    "create_time": 1700000000,
+                    "content": {"content_type": "text", "parts": ["こんにちは"]},
+                },
+            },
+        },
+        "current_node": "m1",
+    }]
+    decoy = json.loads(load("chatgpt_sample.json"))[0]  # any other conversation
+    first = chatgpt.parse([decoy] + base).conversations[-1].source_id
+    second = chatgpt.parse(base + [decoy]).conversations[0].source_id
+    # same content → same id, regardless of where in the list it sat
+    assert first == second
+    # fallback ids are prefixed so they're trivially distinguishable from
+    # real ones in debugging
+    assert first.startswith("fallback-")
+
+
 def test_claude_export_parse():
     data = json.loads(load("claude_sample.json"))
     assert claude_export.looks_like(data)

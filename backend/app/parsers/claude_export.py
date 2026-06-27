@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import hashlib
 
-from .base import ParseResult, ParsedAttachment, ParsedConversation, ParsedMessage, make_title
+from .base import (
+    ParseResult, ParsedAttachment, ParsedConversation, ParsedMessage,
+    fallback_source_id, make_title,
+)
 
 SOURCE = "claude"
 
@@ -142,7 +145,9 @@ def parse(data) -> ParseResult:
                 )
             if not messages:
                 continue
-            source_id = conv.get("uuid") or f"index-{i}"
+            source_id = conv.get("uuid") or fallback_source_id(
+                messages, conv.get("name"), conv.get("created_at"),
+            )
             result.conversations.append(
                 ParsedConversation(
                     source=SOURCE,
