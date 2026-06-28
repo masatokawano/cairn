@@ -281,34 +281,43 @@ class SQLiteVecIndex(VectorIndex):
         return [(r["rowid"], 1.0 - r["distance"]) for r in rows]
 
     def rebuild(self, conn: sqlite3.Connection) -> int:
-        self.clear()
-        rows = conn.execute(
-            "SELECT chunk_id, vector, dimension FROM embeddings"
-        ).fetchall()
-        if not rows:
-            return 0
-        # Pick the dominant dimension — usually the only one — so the
-        # rebuild produces a usable index even if a stray off-dim row exists.
-        dims: dict[int, int] = {}
-        for row in rows:
-            dims[row["dimension"]] = dims.get(row["dimension"], 0) + 1
-        active = max(dims, key=dims.get)
-        self._create_vec_table(active)
-        n = 0
-        for row in rows:
-            if row["dimension"] != active:
-                continue
-            conn.execute(
-                f"INSERT OR REPLACE INTO {_VEC_TABLE}(rowid, embedding) VALUES (?, ?)",
-                (row["chunk_id"], row["vector"]),
-            )
-            n += 1
-        return n
+        # Wrap the whole rebuild in one transaction so a crash mid-way doesn't
+        # leave the index half-populated. Python 3.6+ stopped auto-committing
+        # DDL, so without this `with conn:` block the DROP/CREATE/INSERTs all
+        # roll back on connection close — the bug `admin rebuild-vector-index`
+        # hit in production before this commit (vec0 silently disappeared).
+        with conn:
+            self.clear()
+            rows = conn.execute(
+                "SELECT chunk_id, vector, dimension FROM embeddings"
+            ).fetchall()
+            if not rows:
+                return 0
+            # Pick the dominant dimension — usually the only one — so the
+            # rebuild produces a usable index even if a stray off-dim row exists.
+            dims: dict[int, int] = {}
+            for row in rows:
+                dims[row["dimension"]] = dims.get(row["dimension"], 0) + 1
+            active = max(dims, key=dims.get)
+            self._create_vec_table(active)
+            n = 0
+            for row in rows:
+                if row["dimension"] != active:
+                    continue
+                conn.execute(
+                    f"INSERT OR REPLACE INTO {_VEC_TABLE}(rowid, embedding) VALUES (?, ?)",
+                    (row["chunk_id"], row["vector"]),
+                )
+                n += 1
+            return n
 
     def clear(self) -> None:
         conn = self._conn()
         # Drop both the virtual table and the meta row so a subsequent upsert
-        # creates a fresh vec0 sized to the new dimension.
+        # creates a fresh vec0 sized to the new dimension. Transaction wrapping
+        # is the caller's job — callers either run inside `with conn:` (rebuild)
+        # or call clear() interactively (tests) where auto-rollback at process
+        # exit is exactly what you want.
         conn.execute(f"DROP TABLE IF EXISTS {_VEC_TABLE}")
         self._ensure_meta_table()
         conn.execute(f"DELETE FROM {_META_TABLE} WHERE key='dimension'")

@@ -150,6 +150,34 @@ def test_rebuild_repopulates_after_clear(db):
     assert hits and hits[0]["text"] == "text-2"
 
 
+def test_rebuild_persists_across_connections(tmp_path, monkeypatch):
+    """Regression: `admin rebuild-vector-index` used to roll back silently
+    because Python 3.6+ stopped auto-committing DDL — DROP/CREATE/INSERTs
+    inside rebuild() were all in one uncommitted transaction. Open a new
+    connection after rebuild and verify chunk_vecs still has rows."""
+    import importlib
+    monkeypatch.setenv("CAIRN_DB", str(tmp_path / "test.db"))
+    from app import db as db_module
+    importlib.reload(db_module)
+    db_module.upsert_conversations([_make_conv("c1", "t1"), _make_conv("c2", "t2")])
+    db_module.embed_chunks(FixtureProvider())
+    idx = db_module.vector_index()
+    if idx.name != "sqlite-vec":
+        pytest.skip("regression is sqlite-vec specific")
+    idx.rebuild(db_module.connect())
+
+    # Force a fresh connection by reloading the module — simulates the
+    # behavior of `admin rebuild-vector-index` exiting and a separate
+    # `admin integrity-check` process reading the DB anew.
+    conn = getattr(db_module._local, "conn", None)
+    if conn:
+        conn.close()
+        db_module._local.conn = None
+    importlib.reload(db_module)
+    n = db_module.connect().execute("SELECT COUNT(*) FROM chunk_vecs").fetchone()[0]
+    assert n == 2  # the two upserted convs, each one chunk
+
+
 # --- perf smoke -------------------------------------------------------------
 
 def test_1000_vector_search_completes_quickly(db):
