@@ -14,16 +14,15 @@ source config.env
 : "${OBSIDIAN_VAULT:?OBSIDIAN_VAULT が設定されていません}"
 : "${OBSIDIAN_EXTERNAL_BRAIN_DIR:?OBSIDIAN_EXTERNAL_BRAIN_DIR が設定されていません}"
 
-SOURCE_FILE="$OBSIDIAN_VAULT/$OBSIDIAN_EXTERNAL_BRAIN_DIR/90 Auto/karakeep-to-review.md"
+AUTO_DIR="$OBSIDIAN_VAULT/$OBSIDIAN_EXTERNAL_BRAIN_DIR/90 Auto"
 TARGET_DIR="$OBSIDIAN_VAULT/$OBSIDIAN_EXTERNAL_BRAIN_DIR/40 Reviews/Weekly"
 
-YEAR_WEEK="$(date '+%G-W%V')"
-TARGET_FILE="$TARGET_DIR/$YEAR_WEEK.md"
+KARAKEEP_FILE="$AUTO_DIR/karakeep-to-review.md"
+CAIRN_FILE="$AUTO_DIR/cairn-recent.md"
 
-if [[ ! -f "$SOURCE_FILE" ]]; then
-  echo "元ファイルがありません: $SOURCE_FILE" >&2
-  exit 1
-fi
+# テスト時だけ BRAIN_SYNC_WEEK=2099-W01 のように上書き可能
+YEAR_WEEK="${BRAIN_SYNC_WEEK:-$(date '+%G-W%V')}"
+TARGET_FILE="$TARGET_DIR/$YEAR_WEEK.md"
 
 mkdir -p "$TARGET_DIR"
 
@@ -32,6 +31,46 @@ if [[ -e "$TARGET_FILE" ]]; then
   exit 0
 fi
 
+extract_items() {
+  local source_file="$1"
+
+  if [[ ! -f "$source_file" ]]; then
+    echo "_データファイルがまだありません。_"
+    return
+  fi
+
+  # YAML frontmatter、文書タイトル、説明文を除き、
+  # 最初の項目見出し（##）以降だけを出力する
+  awk '
+    BEGIN {
+      in_frontmatter = 0
+      body_started = 0
+    }
+
+    NR == 1 && $0 == "---" {
+      in_frontmatter = 1
+      next
+    }
+
+    in_frontmatter && $0 == "---" {
+      in_frontmatter = 0
+      next
+    }
+
+    in_frontmatter {
+      next
+    }
+
+    /^## / {
+      body_started = 1
+    }
+
+    body_started {
+      print
+    }
+  ' "$source_file"
+}
+
 {
   cat <<EOF2
 ---
@@ -39,48 +78,59 @@ type: weekly-external-brain-review
 week: $YEAR_WEEK
 created: $(date '+%Y-%m-%d %H:%M:%S')
 status: open
+sources:
+  - karakeep
+  - cairn
 ---
 
 # External Brain Weekly Review — $YEAR_WEEK
 
 ## 今週の処理方針
 
-- [ ] Karakeep項目を確認する
-- [ ] Zoteroへ昇格する資料を選ぶ
-- [ ] Obsidianへ反映する着想を選ぶ
+- [ ] Karakeepの保存資料を確認する
+- [ ] Cairnの重要な対話を確認する
+- [ ] Zoteroへ昇格する根拠資料を選ぶ
+- [ ] Obsidianへ反映する着想・結論を選ぶ
+- [ ] 未解決課題を整理する
 - [ ] レビューを完了する
 
 ---
 
+# Karakeep：発見したもの
+
 EOF2
 
-  # 元ファイルのYAML frontmatterと最初の見出し・説明を除き、
-  # 各項目部分を週次レビューへコピーする
-  awk '
-    BEGIN { frontmatter = 0; separators = 0; body = 0 }
+  extract_items "$KARAKEEP_FILE"
 
-    NR == 1 && $0 == "---" {
-      frontmatter = 1
-      next
-    }
+  cat <<'EOF2'
 
-    frontmatter && $0 == "---" {
-      frontmatter = 0
-      next
-    }
+---
 
-    frontmatter {
-      next
-    }
+# Cairn：考えた過程
 
-    /^## / {
-      body = 1
-    }
+EOF2
 
-    body {
-      print
-    }
-  ' "$SOURCE_FILE"
+  extract_items "$CAIRN_FILE"
+
+  cat <<'EOF2'
+
+---
+
+# 今週の統合メモ
+
+## 繰り返し現れたテーマ
+
+## 新しく得た着想
+
+## 根拠資料として残すもの
+
+## 過去の考えから変化した点
+
+## 未解決の問い
+
+## 来週行うこと
+
+EOF2
 } > "$TARGET_FILE"
 
 echo "Created: $TARGET_FILE"
