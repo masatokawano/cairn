@@ -74,10 +74,41 @@ def main() -> int:
     conversations = payload.get("results", [])
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
+    excluded_title_prefixes = (
+        "Review this change for security vulnerabilities.",
+        "You are a security expert reviewing",
+    )
+
+    excluded_exact_titles = {
+        "New chat",
+        "User Request: Help Needed",
+        "Untitled",
+    }
+
+    def is_review_candidate(item: dict) -> bool:
+        title = (item.get("title") or "").strip()
+        message_count = int(item.get("message_count", 0))
+
+        if not title:
+            return False
+
+        if title in excluded_exact_titles:
+            return False
+
+        if title.startswith(excluded_title_prefixes):
+            return False
+
+        # 単発質問や自動処理ログを週次レビューから除外する。
+        if message_count < 4:
+            return False
+
+        return True
+
     recent = [
         item
         for item in conversations
         if parse_timestamp(item["updated_at"]) >= cutoff
+        and is_review_candidate(item)
     ]
 
     recent.sort(
