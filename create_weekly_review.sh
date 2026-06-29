@@ -28,9 +28,8 @@ fi
 mkdir -p "$TARGET_DIR"
 
 if [[ -e "$TARGET_FILE" ]]; then
-  echo "週次レビューはすでに存在します: $TARGET_FILE" >&2
-  echo "既存内容を保護するため上書きしません。" >&2
-  exit 1
+  echo "Weekly review already exists: $TARGET_FILE"
+  exit 0
 fi
 
 {
