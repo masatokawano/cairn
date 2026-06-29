@@ -9,6 +9,7 @@ cd "/Users/masato/workspace/brain-sync"
 ./sync_karakeep_review.sh
 ./run_cairn_sync.sh
 ./run_zotero_sync.sh
+./sync_obsidian_context.py
 
 # その週のレビューがなければ作成
 ./create_weekly_review.sh

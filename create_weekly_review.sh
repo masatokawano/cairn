@@ -20,6 +20,7 @@ TARGET_DIR="$OBSIDIAN_VAULT/$OBSIDIAN_EXTERNAL_BRAIN_DIR/40 Reviews/Weekly"
 KARAKEEP_FILE="$AUTO_DIR/karakeep-to-review.md"
 CAIRN_FILE="$AUTO_DIR/cairn-recent.md"
 ZOTERO_FILE="$AUTO_DIR/zotero-recent.md"
+OBSIDIAN_FILE="$AUTO_DIR/obsidian-context.md"
 
 # テスト時だけ BRAIN_SYNC_WEEK=2099-W01 のように上書き可能
 YEAR_WEEK="${BRAIN_SYNC_WEEK:-$(date '+%G-W%V')}"
@@ -83,6 +84,7 @@ sources:
   - karakeep
   - cairn
   - zotero
+  - obsidian
 ---
 
 # External Brain Weekly Review — $YEAR_WEEK
@@ -124,6 +126,16 @@ EOF2
 EOF2
 
   extract_items "$ZOTERO_FILE"
+
+  cat <<'EOF2'
+
+---
+
+# Obsidian：現在の理解
+
+EOF2
+
+  extract_items "$OBSIDIAN_FILE"
 
   cat <<'EOF2'
 
