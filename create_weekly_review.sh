@@ -19,6 +19,7 @@ TARGET_DIR="$OBSIDIAN_VAULT/$OBSIDIAN_EXTERNAL_BRAIN_DIR/40 Reviews/Weekly"
 
 KARAKEEP_FILE="$AUTO_DIR/karakeep-to-review.md"
 CAIRN_FILE="$AUTO_DIR/cairn-recent.md"
+ZOTERO_FILE="$AUTO_DIR/zotero-recent.md"
 
 # テスト時だけ BRAIN_SYNC_WEEK=2099-W01 のように上書き可能
 YEAR_WEEK="${BRAIN_SYNC_WEEK:-$(date '+%G-W%V')}"
@@ -81,6 +82,7 @@ status: open
 sources:
   - karakeep
   - cairn
+  - zotero
 ---
 
 # External Brain Weekly Review — $YEAR_WEEK
@@ -89,7 +91,8 @@ sources:
 
 - [ ] Karakeepの保存資料を確認する
 - [ ] Cairnの重要な対話を確認する
-- [ ] Zoteroへ昇格する根拠資料を選ぶ
+- [ ] Zoteroの新規資料を確認する
+- [ ] KarakeepからZoteroへ昇格する資料を選ぶ
 - [ ] Obsidianへ反映する着想・結論を選ぶ
 - [ ] 未解決課題を整理する
 - [ ] レビューを完了する
@@ -111,6 +114,16 @@ EOF2
 EOF2
 
   extract_items "$CAIRN_FILE"
+
+  cat <<'EOF2'
+
+---
+
+# Zotero：根拠資料
+
+EOF2
+
+  extract_items "$ZOTERO_FILE"
 
   cat <<'EOF2'
 
