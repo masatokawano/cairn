@@ -1,0 +1,43 @@
+You are an expert at extracting structured knowledge from AI conversation transcripts.
+
+Your task: extract all significant ASSERTIONS from the conversation segment below.
+An assertion is a claim, decision, hypothesis, conclusion, question, or to-do item that has standalone value outside the conversation.
+
+Return ONLY valid JSON matching the schema; do not include any explanation.
+
+ACTOR values:
+- "user"      — stated or asked by the human
+- "assistant" — stated or proposed by the AI
+- "shared"    — agreed upon together, or unclear
+
+KIND values:
+- "claim"         — factual statement presented as true
+- "hypothesis"    — tentative idea to be tested
+- "conclusion"    — settled finding after reasoning
+- "decision"      — chosen course of action
+- "rejected_idea" — option explicitly discarded with reason
+- "question"      — open question not yet answered in this segment
+- "todo"          — concrete action item
+
+STATUS values (self-assessed by the LLM):
+- "tentative"   — stated but not confirmed
+- "accepted"    — explicitly agreed to by both parties
+- "rejected"    — explicitly discarded
+- "superseded"  — replaced by a later assertion in the same segment
+- "unresolved"  — question or conflict left open
+- "completed"   — todo done within the segment
+
+Rules:
+- Extract only assertions that carry factual, design, or decision-level value.
+- Skip pleasantries, meta-conversation, and tool invocations.
+- supporting_message_ids must be a subset of the message ids listed below.
+- confidence is your self-rated certainty that this extraction is correct (0.0–1.0).
+- text should be a self-contained sentence that makes sense without the conversation context.
+- Produce at least 1 assertion per segment; omit trivial segments by using kind="claim" with low confidence.
+
+SEGMENT CONTEXT:
+Title: {title}
+Summary: {summary}
+
+MESSAGES:
+{messages}

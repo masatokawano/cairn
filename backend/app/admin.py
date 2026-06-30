@@ -317,6 +317,100 @@ AUDIT_DEPS_CMD = [
 ]
 
 
+def cmd_llm_ping(args) -> int:
+    """Check connectivity to ollama and whether the configured model is available."""
+    from .llm.ollama import OllamaProvider
+    model = args.model or None
+    provider = OllamaProvider(model) if model else OllamaProvider()
+    result = provider.ping()
+    if result["ok"]:
+        print(f"ok  model={result['model']}")
+        print(f"    available: {', '.join(result['available_models'])}")
+        return 0
+    else:
+        print(f"FAIL  {result['error']}", file=sys.stderr)
+        print(f"      available: {', '.join(result['available_models'])}", file=sys.stderr)
+        return 1
+
+
+def cmd_extraction_runs(args) -> int:
+    """List recent extraction runs."""
+    runs = db.list_extraction_runs(limit=args.limit, kind=args.kind or None)
+    if not runs:
+        print("(no extraction runs)")
+        return 0
+    for r in runs:
+        status = r["status"]
+        icon = "✓" if status == "ok" else ("~" if status == "partial" else "✗")
+        w = f"  ⚠{r['warnings']}" if r["warnings"] else ""
+        tok = ""
+        if r.get("input_token_count") or r.get("output_token_count"):
+            tok = f"  in={r.get('input_token_count',0)} out={r.get('output_token_count',0)}"
+        print(f"{icon} [{r['id']:4d}] {r['kind']:<12} {r['scope']:<30} "
+              f"{r['provider']}:{r['model'] or '—'}  "
+              f"pv={r['prompt_version']}  {r['started_at'][:16]}{w}{tok}")
+        if r.get("error"):
+            print(f"       error: {r['error'][:120]}")
+    return 0
+
+
+def cmd_extract_assertions(args) -> int:
+    """Run LLM-based assertion extraction from segments."""
+    from .extraction.assertion_runner import run_assertion_extraction
+    from .llm.ollama import OllamaProvider
+    provider = OllamaProvider(model=args.model) if args.model else OllamaProvider()
+    summary = run_assertion_extraction(
+        provider,
+        segment_id=args.segment or None,
+        since=args.since or None,
+        limit=args.limit or None,
+        force=args.force,
+    )
+    print(
+        f"done  segs={summary['segments']}  assertions={summary['assertions']}  "
+        f"retries={summary['retries']}  warnings={summary['warnings']}  "
+        f"run_id={summary['run_id']}"
+    )
+    return 0
+
+
+def cmd_extract_segments(args) -> int:
+    """Run LLM-based segment extraction."""
+    from .extraction.segment_runner import run_segment_extraction
+    from .llm.ollama import OllamaProvider
+    provider = OllamaProvider(model=args.model) if args.model else OllamaProvider()
+    summary = run_segment_extraction(
+        provider,
+        conversation_id=args.conversation or None,
+        since=args.since or None,
+        limit=args.limit or None,
+        force=args.force,
+    )
+    print(
+        f"done  convs={summary['conversations']}  segs={summary['segments']}  "
+        f"retries={summary['retries']}  warnings={summary['warnings']}  "
+        f"run_id={summary['run_id']}"
+    )
+    return 0
+
+
+def cmd_extract_rules(args) -> int:
+    """Run rules-based entity extraction (URL + GitHub repo)."""
+    from .extraction.rules_runner import run_rules_extraction
+    conv_id = args.conversation or None
+    limit = args.limit or None
+    summary = run_rules_extraction(conversation_id=conv_id, limit=limit)
+    print(
+        f"done  convs={summary['conversations']}  msgs={summary['messages']}  "
+        f"entities={summary['entities_new']}  mentions_new={summary['mentions_new']}  "
+        f"warnings={summary['warnings']}  run_id={summary['run_id']}"
+    )
+    orphans = db.orphan_entity_mentions()
+    if orphans:
+        print(f"WARNING: {len(orphans)} orphan entity_mention(s) detected — run integrity-check")
+    return 0
+
+
 def cmd_audit_deps(_args) -> int:
     """Run pip-audit against requirements.lock and return its exit code.
     `--no-deps --disable-pip` avoids the inner venv that SIGABRTs on some
@@ -384,6 +478,33 @@ def main(argv=None) -> int:
     p_reindex.set_defaults(func=cmd_reindex)
     sub.add_parser("rebuild-vector-index").set_defaults(func=cmd_rebuild_vector_index)
     sub.add_parser("audit-deps").set_defaults(func=cmd_audit_deps)
+    p_llm_ping = sub.add_parser("llm-ping", help="check ollama connectivity and model availability")
+    p_llm_ping.add_argument("--model", default=None, help="override default model")
+    p_llm_ping.set_defaults(func=cmd_llm_ping)
+    p_ext_runs = sub.add_parser("extraction-runs", help="list recent extraction runs")
+    p_ext_runs.add_argument("--limit", type=int, default=20)
+    p_ext_runs.add_argument("--kind", default=None, help="filter: rules-entity | segment | assertion | artifact")
+    p_ext_runs.set_defaults(func=cmd_extraction_runs)
+    p_exa = sub.add_parser("extract-assertions", help="run LLM assertion extraction from segments")
+    p_exa.add_argument("--segment", type=int, default=None, metavar="ID")
+    p_exa.add_argument("--since", default=None, metavar="DATE")
+    p_exa.add_argument("--limit", type=int, default=None, metavar="N")
+    p_exa.add_argument("--force", action="store_true")
+    p_exa.add_argument("--model", default=None, help="override ollama model")
+    p_exa.set_defaults(func=cmd_extract_assertions)
+    p_exs = sub.add_parser("extract-segments", help="run LLM segment extraction")
+    p_exs.add_argument("--conversation", type=int, default=None, metavar="ID")
+    p_exs.add_argument("--since", default=None, metavar="DATE", help="ISO date, skip older convs")
+    p_exs.add_argument("--limit", type=int, default=None, metavar="N")
+    p_exs.add_argument("--force", action="store_true", help="regenerate even if segments exist")
+    p_exs.add_argument("--model", default=None, help="override ollama model")
+    p_exs.set_defaults(func=cmd_extract_segments)
+    p_exr = sub.add_parser("extract-rules", help="run rules-based entity extraction (URL + repo)")
+    p_exr.add_argument("--conversation", type=int, default=None, metavar="ID",
+                       help="restrict to a single conversation id")
+    p_exr.add_argument("--limit", type=int, default=None, metavar="N",
+                       help="cap number of conversations processed")
+    p_exr.set_defaults(func=cmd_extract_rules)
     args = parser.parse_args(argv)
     return args.func(args)
 

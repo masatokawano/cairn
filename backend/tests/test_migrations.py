@@ -117,3 +117,25 @@ def test_migrations_run_in_order_and_are_idempotent(db, monkeypatch):
     _reset_conn(db)
     db.connect()
     assert _user_version(db) == base + 2
+
+
+def test_migration_v7_extraction_runs_table(db):
+    """Migration 7 creates the extraction_runs table on a pre-v7 DB."""
+    tables = [r[0] for r in db.connect().execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()]
+    assert "extraction_runs" in tables
+    cols = [r[1] for r in db.connect().execute("PRAGMA table_info(extraction_runs)").fetchall()]
+    for expected in ("id", "kind", "scope", "provider", "model", "prompt_version",
+                     "started_at", "completed_at", "status", "input_token_count",
+                     "output_token_count", "retries", "warnings", "warning_summary", "error"):
+        assert expected in cols, f"missing column: {expected}"
+
+
+def test_migration_v7_extraction_runs_indexes(db):
+    """extraction_runs has the expected indexes after migration 7."""
+    indexes = [r[1] for r in db.connect().execute(
+        "SELECT * FROM sqlite_master WHERE type='index' AND tbl_name='extraction_runs'"
+    ).fetchall()]
+    assert any("kind" in idx for idx in indexes)
+    assert any("status" in idx for idx in indexes)

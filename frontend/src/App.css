@@ -6,6 +6,8 @@
   --line: #e4e1da;
   --accent: #4a6b5d;
   --mark: #ffe9a8;
+  --danger: #d96057;
+  --warn: #b8893a;
 }
 
 * {
@@ -499,3 +501,218 @@ mark {
   max-height: 240px;
   overflow-y: auto;
 }
+
+/* ── Conversation tabs (P3-E) ───────────────────────────────────────── */
+.conv-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0;
+}
+.conv-tab {
+  padding: 8px 16px;
+  font-size: 13px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.conv-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Segment cards ───────────────────────────────────────────────────── */
+.seg-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.seg-card.seg-locked {
+  border-color: var(--accent);
+}
+.seg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: #fafaf8;
+  user-select: none;
+}
+.seg-head:hover { background: #f3f1ec; }
+.seg-idx {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 22px;
+}
+.seg-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+.seg-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+.seg-toggle {
+  font-size: 11px;
+  color: var(--muted);
+}
+.lock-badge {
+  font-size: 12px;
+}
+.seg-body {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+.seg-summary {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.seg-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.seg-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.seg-title-input {
+  width: 100%;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.seg-summary-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 80px;
+  resize: vertical;
+  margin-bottom: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* ── Assertion rows ──────────────────────────────────────────────────── */
+.assertion-row {
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+}
+.assertion-row.assertion-locked {
+  background: #f7faf9;
+}
+.assertion-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+.a-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.a-actor-user    { background: #dbeafe; color: #1e40af; }
+.a-actor-assistant { background: #dcfce7; color: #166534; }
+.a-actor-shared  { background: #fef9c3; color: #854d0e; }
+.a-kind-claim    { background: #f1f5f9; color: #475569; }
+.a-kind-hypothesis { background: #faf5ff; color: #7c3aed; }
+.a-kind-conclusion { background: #eff6ff; color: #1d4ed8; }
+.a-kind-decision { background: #fff7ed; color: #c2410c; }
+.a-kind-rejected_idea { background: #fef2f2; color: #991b1b; }
+.a-kind-question { background: #f0fdf4; color: #15803d; }
+.a-kind-todo     { background: #fefce8; color: #a16207; }
+.a-status-tentative  { background: #f8fafc; color: #64748b; }
+.a-status-accepted   { background: #dcfce7; color: #166534; }
+.a-status-rejected   { background: #fef2f2; color: #991b1b; }
+.a-status-superseded { background: #f1f5f9; color: #475569; }
+.a-status-unresolved { background: #fff7ed; color: #c2410c; }
+.a-status-completed  { background: #eff6ff; color: #1d4ed8; }
+.a-conf {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 4px;
+}
+.assertion-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.assertion-actions {
+  display: flex;
+  gap: 6px;
+}
+.assertion-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assertion-text-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 60px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: inherit;
+  line-height: 1.5;
+}
+.assertion-edit-selects {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.assertion-edit-selects select {
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.assertion-edit-btns {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Shared edit/delete buttons ─────────────────────────────────────── */
+.btn-edit, .btn-delete, .btn-save, .btn-cancel {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.btn-edit   { background: #f1f5f9; color: #475569; }
+.btn-edit:hover { background: #e2e8f0; }
+.btn-delete { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
+.btn-delete:hover { background: #fee2e2; }
+.btn-save   { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-save:hover { opacity: 0.9; }
+.btn-cancel { background: #f8fafc; color: var(--muted); }
+.btn-cancel:hover { background: #f1f5f9; }

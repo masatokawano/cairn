@@ -42,6 +42,31 @@ type Conversation = {
 
 type SourceStat = { source: string; conversations: number; messages: number }
 
+type Assertion = {
+  id: number
+  segment_id: number
+  text: string
+  actor: 'user' | 'assistant' | 'shared'
+  kind: 'claim' | 'hypothesis' | 'conclusion' | 'decision' | 'rejected_idea' | 'question' | 'todo'
+  status: 'tentative' | 'accepted' | 'rejected' | 'superseded' | 'unresolved' | 'completed'
+  confidence: number | null
+  supporting_message_ids: number[]
+  locked_by_user: number
+  user_edited_at: string | null
+}
+
+type Segment = {
+  id: number
+  conversation_id: number
+  idx: number
+  title: string
+  summary: string
+  topics: string
+  locked_by_user: number
+  user_edited_at: string | null
+  assertions: Assertion[]
+}
+
 type ImportRun = {
   id: number
   source: string
@@ -151,6 +176,14 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false)
   const [importRuns, setImportRuns] = useState<ImportRun[] | null>(null)
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
+  const [convTab, setConvTab] = useState<'messages' | 'extractions'>('messages')
+  const [extractions, setExtractions] = useState<Segment[] | null>(null)
+  const [extractionsBusy, setExtractionsBusy] = useState(false)
+  const [expandedSegId, setExpandedSegId] = useState<number | null>(null)
+  const [editingSegId, setEditingSegId] = useState<number | null>(null)
+  const [editSegDraft, setEditSegDraft] = useState<{ title: string; summary: string }>({ title: '', summary: '' })
+  const [editingAssertionId, setEditingAssertionId] = useState<number | null>(null)
+  const [editAssertionDraft, setEditAssertionDraft] = useState<{ text: string; actor: string; kind: string; status: string }>({ text: '', actor: '', kind: '', status: '' })
   const fileInput = useRef<HTMLInputElement>(null)
   const debounce = useRef<number>(0)
 
@@ -207,9 +240,61 @@ export default function App() {
   }, [mode])
 
   const openConversation = (id: number) => {
+    setConvTab('messages')
+    setExtractions(null)
+    setExpandedSegId(null)
+    setEditingSegId(null)
+    setEditingAssertionId(null)
     api<Conversation>(`/api/conversations/${id}`)
       .then(setSelected)
       .catch((e: Error) => setNotice(`会話の取得に失敗しました: ${e.message}`))
+  }
+
+  const loadExtractions = (convId: number) => {
+    setExtractionsBusy(true)
+    api<{ segments: Segment[] }>(`/api/conversations/${convId}/extractions`)
+      .then((d) => {
+        setExtractions(d.segments)
+        if (d.segments.length > 0) setExpandedSegId(d.segments[0].id)
+      })
+      .catch((e: Error) => setNotice(`抽出結果の取得に失敗しました: ${e.message}`))
+      .finally(() => setExtractionsBusy(false))
+  }
+
+  const saveSegment = (segId: number, title: string, summary: string, convId: number) => {
+    api<{ ok: boolean }>(`/api/segments/${segId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, summary }),
+    })
+      .then(() => { setEditingSegId(null); loadExtractions(convId) })
+      .catch((e: Error) => setNotice(`保存に失敗しました: ${e.message}`))
+  }
+
+  const deleteSegment = (segId: number, convId: number) => {
+    if (!confirm('このセグメントを削除しますか？')) return
+    api<{ ok: boolean }>(`/api/segments/${segId}`, { method: 'DELETE' })
+      .then(() => loadExtractions(convId))
+      .catch((e: Error) => setNotice(`削除に失敗しました: ${e.message}`))
+  }
+
+  const saveAssertion = (
+    assertionId: number, text: string, actor: string, kind: string, status: string, convId: number
+  ) => {
+    api<{ ok: boolean }>(`/api/assertions/${assertionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, actor, kind, status }),
+    })
+      .then(() => { setEditingAssertionId(null); loadExtractions(convId) })
+      .catch((e: Error) => setNotice(`保存に失敗しました: ${e.message}`))
+  }
+
+  const deleteAssertion = (assertionId: number, convId: number) => {
+    if (!confirm('この Assertion を削除しますか？')) return
+    api<{ ok: boolean }>(`/api/assertions/${assertionId}`, { method: 'DELETE' })
+      .then(() => loadExtractions(convId))
+      .catch((e: Error) => setNotice(`削除に失敗しました: ${e.message}`))
   }
 
   const openImportRuns = () => {
@@ -537,17 +622,151 @@ export default function App() {
               {selected.meta.cwd ? ` · ${selected.meta.cwd}` : ''}
               {` · ${selected.messages.length} メッセージ`}
             </div>
-            <div className="messages">
-              {selected.messages.map((m) => (
-                <div key={m.id} className={`msg msg-${m.role}`}>
-                  <div className="msg-role">
-                    {m.role === 'user' ? 'You' : m.role === 'assistant' ? 'AI' : m.role}
-                    <span className="msg-date">{fmtDate(m.created_at)}</span>
-                  </div>
-                  <pre className="msg-text">{m.text}</pre>
-                </div>
-              ))}
+
+            <div className="conv-tabs">
+              <button
+                className={`conv-tab ${convTab === 'messages' ? 'active' : ''}`}
+                onClick={() => setConvTab('messages')}
+              >
+                メッセージ
+              </button>
+              <button
+                className={`conv-tab ${convTab === 'extractions' ? 'active' : ''}`}
+                onClick={() => {
+                  setConvTab('extractions')
+                  if (extractions === null) loadExtractions(selected.id)
+                }}
+              >
+                抽出結果
+              </button>
             </div>
+
+            {convTab === 'messages' && (
+              <div className="messages">
+                {selected.messages.map((m) => (
+                  <div key={m.id} className={`msg msg-${m.role}`}>
+                    <div className="msg-role">
+                      {m.role === 'user' ? 'You' : m.role === 'assistant' ? 'AI' : m.role}
+                      <span className="msg-date">{fmtDate(m.created_at)}</span>
+                    </div>
+                    <pre className="msg-text">{m.text}</pre>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {convTab === 'extractions' && (
+              <div className="messages">
+                {extractionsBusy && <p className="empty">読み込み中…</p>}
+                {!extractionsBusy && extractions !== null && extractions.length === 0 && (
+                  <p className="empty">セグメントがありません。<code>admin extract-segments</code> を実行してください。</p>
+                )}
+                {!extractionsBusy && extractions !== null && extractions.map((seg) => {
+                  const isOpen = expandedSegId === seg.id
+                  const isEditSeg = editingSegId === seg.id
+                  let topicsArr: string[] = []
+                  try { topicsArr = JSON.parse(seg.topics || '[]') } catch { /* ignore */ }
+                  return (
+                    <div key={seg.id} className={`seg-card ${seg.locked_by_user ? 'seg-locked' : ''}`}>
+                      <div className="seg-head" onClick={() => setExpandedSegId(isOpen ? null : seg.id)}>
+                        <span className="seg-idx">§{seg.idx + 1}</span>
+                        {seg.locked_by_user === 1 && <span className="lock-badge" title="手動編集済み">🔒</span>}
+                        <span className="seg-title">{seg.title}</span>
+                        <span className="seg-count">{seg.assertions.length}件</span>
+                        <span className="seg-toggle">{isOpen ? '▼' : '▶'}</span>
+                      </div>
+
+                      {isOpen && !isEditSeg && (
+                        <div className="seg-body">
+                          <p className="seg-summary">{seg.summary}</p>
+                          {topicsArr.length > 0 && (
+                            <div className="seg-topics">
+                              {topicsArr.map((t) => <span key={t} className="kw-chip">{t}</span>)}
+                            </div>
+                          )}
+                          <div className="seg-actions">
+                            <button className="btn-edit" onClick={() => {
+                              setEditingSegId(seg.id)
+                              setEditSegDraft({ title: seg.title, summary: seg.summary })
+                            }}>編集</button>
+                            <button className="btn-delete" onClick={() => deleteSegment(seg.id, selected.id)}>削除</button>
+                          </div>
+
+                          {seg.assertions.map((a) => {
+                            const isEditA = editingAssertionId === a.id
+                            return (
+                              <div key={a.id} className={`assertion-row ${a.locked_by_user ? 'assertion-locked' : ''}`}>
+                                {isEditA ? (
+                                  <div className="assertion-edit">
+                                    <textarea
+                                      className="assertion-text-input"
+                                      value={editAssertionDraft.text}
+                                      onChange={(e) => setEditAssertionDraft({ ...editAssertionDraft, text: e.target.value })}
+                                    />
+                                    <div className="assertion-edit-selects">
+                                      <select value={editAssertionDraft.actor} onChange={(e) => setEditAssertionDraft({ ...editAssertionDraft, actor: e.target.value })}>
+                                        {['user', 'assistant', 'shared'].map(v => <option key={v} value={v}>{v}</option>)}
+                                      </select>
+                                      <select value={editAssertionDraft.kind} onChange={(e) => setEditAssertionDraft({ ...editAssertionDraft, kind: e.target.value })}>
+                                        {['claim', 'hypothesis', 'conclusion', 'decision', 'rejected_idea', 'question', 'todo'].map(v => <option key={v} value={v}>{v}</option>)}
+                                      </select>
+                                      <select value={editAssertionDraft.status} onChange={(e) => setEditAssertionDraft({ ...editAssertionDraft, status: e.target.value })}>
+                                        {['tentative', 'accepted', 'rejected', 'superseded', 'unresolved', 'completed'].map(v => <option key={v} value={v}>{v}</option>)}
+                                      </select>
+                                    </div>
+                                    <div className="assertion-edit-btns">
+                                      <button className="btn-save" onClick={() => saveAssertion(a.id, editAssertionDraft.text, editAssertionDraft.actor, editAssertionDraft.kind, editAssertionDraft.status, selected.id)}>保存</button>
+                                      <button className="btn-cancel" onClick={() => setEditingAssertionId(null)}>キャンセル</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="assertion-meta">
+                                      <span className={`a-badge a-actor-${a.actor}`}>{a.actor}</span>
+                                      <span className={`a-badge a-kind-${a.kind}`}>{a.kind}</span>
+                                      <span className={`a-badge a-status-${a.status}`}>{a.status}</span>
+                                      {a.confidence !== null && <span className="a-conf">{(a.confidence * 100).toFixed(0)}%</span>}
+                                      {a.locked_by_user === 1 && <span className="lock-badge" title="手動編集済み">🔒</span>}
+                                    </div>
+                                    <p className="assertion-text">{a.text}</p>
+                                    <div className="assertion-actions">
+                                      <button className="btn-edit" onClick={() => {
+                                        setEditingAssertionId(a.id)
+                                        setEditAssertionDraft({ text: a.text, actor: a.actor, kind: a.kind, status: a.status })
+                                      }}>編集</button>
+                                      <button className="btn-delete" onClick={() => deleteAssertion(a.id, selected.id)}>削除</button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      {isOpen && isEditSeg && (
+                        <div className="seg-body">
+                          <input
+                            className="seg-title-input"
+                            value={editSegDraft.title}
+                            onChange={(e) => setEditSegDraft({ ...editSegDraft, title: e.target.value })}
+                          />
+                          <textarea
+                            className="seg-summary-input"
+                            value={editSegDraft.summary}
+                            onChange={(e) => setEditSegDraft({ ...editSegDraft, summary: e.target.value })}
+                          />
+                          <div className="seg-actions">
+                            <button className="btn-save" onClick={() => saveSegment(seg.id, editSegDraft.title, editSegDraft.summary, selected.id)}>保存</button>
+                            <button className="btn-cancel" onClick={() => setEditingSegId(null)}>キャンセル</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

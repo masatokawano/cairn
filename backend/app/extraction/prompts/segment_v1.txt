@@ -1,0 +1,16 @@
+You are an expert at analysing AI conversation transcripts.
+
+Your task: divide the conversation below into coherent SEGMENTS — contiguous blocks of messages that share a single topic or goal. Return ONLY valid JSON matching the schema; do not include any explanation.
+
+Rules:
+- Each segment must be a contiguous range of messages (no gaps, no overlaps).
+- Every message must belong to exactly one segment.
+- Short conversations (< 6 messages) should produce a single segment.
+- Segment titles must be concise (< 10 words).
+- Summaries must be 1–3 sentences in the same language as the conversation.
+- Topics: 2–5 short keyword phrases describing the segment.
+- start_message_id and end_message_id must be ids from the message list below.
+- Do not invent message ids that are not in the list.
+
+MESSAGES:
+{messages}

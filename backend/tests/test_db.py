@@ -106,3 +106,128 @@ def test_file_state_roundtrip(db):
     assert db.file_state("/tmp/x") == (123.0, 456)
     db.record_file_state("/tmp/x", 124.0, 457)
     assert db.file_state("/tmp/x") == (124.0, 457)
+
+
+# ---------------------------------------------------------------------------
+# Derived-data preservation on conversation update
+# ---------------------------------------------------------------------------
+
+def _seed_segments_and_assertions(db):
+    """Insert a conversation with 2 messages, 1 segment, 1 assertion. Returns conv_id."""
+    from app.parsers.base import ParsedConversation, ParsedMessage
+    conv = ParsedConversation(
+        source="chatgpt", source_id="preserve-test",
+        title="preserve test",
+        messages=[
+            ParsedMessage(role="user", text="Hello world", created_at="2025-01-01T00:00:00Z"),
+            ParsedMessage(role="assistant", text="Hi there", created_at="2025-01-01T00:01:00Z"),
+        ],
+        created_at="2025-01-01T00:00:00Z", updated_at="2025-01-01T00:01:00Z",
+    )
+    db.upsert_conversations([conv])
+    conn = db.connect()
+    conv_id = conn.execute("SELECT id FROM conversations WHERE source_id='preserve-test'").fetchone()[0]
+    msg_ids = [r[0] for r in conn.execute(
+        "SELECT id FROM messages WHERE conversation_id=? ORDER BY idx", (conv_id,)
+    ).fetchall()]
+    seg_id = db.insert_segment(
+        conversation_id=conv_id, idx=0,
+        start_message_id=msg_ids[0], end_message_id=msg_ids[1],
+        title="The segment", summary="A summary.",
+        generated_by="test:v1", prompt_version="segment-v1",
+        created_at="2026-01-01T00:00:00",
+    )
+    db.insert_assertion(
+        segment_id=seg_id, conversation_id=conv_id,
+        text="Some fact.", actor="assistant", kind="claim",
+        status="tentative", confidence=0.9,
+        supporting_message_ids=json.dumps([msg_ids[1]]),
+        generated_by="test:v1", prompt_version="assertion-v1",
+        created_at="2026-01-01T00:00:00",
+    )
+    return conv_id, msg_ids
+
+
+def test_upsert_preserves_segments_on_update(db):
+    """Segments must survive a conversation update (new messages, new IDs)."""
+    conv_id, _ = _seed_segments_and_assertions(db)
+    assert len(db.list_segments(conversation_id=conv_id)) == 1
+
+    # Update the conversation (same 2 messages + a new third message).
+    from app.parsers.base import ParsedConversation, ParsedMessage
+    updated = ParsedConversation(
+        source="chatgpt", source_id="preserve-test",
+        title="preserve test",
+        messages=[
+            ParsedMessage(role="user", text="Hello world", created_at="2025-01-01T00:00:00Z"),
+            ParsedMessage(role="assistant", text="Hi there — updated", created_at="2025-01-01T00:01:00Z"),
+            ParsedMessage(role="user", text="New message", created_at="2025-01-01T00:02:00Z"),
+        ],
+        created_at="2025-01-01T00:00:00Z", updated_at="2025-01-01T00:02:00Z",
+    )
+    result = db.upsert_conversations([updated])
+    assert result["updated"] == 1
+
+    segs = db.list_segments(conversation_id=conv_id)
+    assert len(segs) == 1, "segment should be preserved after update"
+    assert segs[0]["title"] == "The segment"
+
+    # The segment's message IDs should now reference the new messages.
+    conn = db.connect()
+    seg = conn.execute("SELECT start_message_id, end_message_id FROM segments WHERE conversation_id=?",
+                       (conv_id,)).fetchone()
+    new_msg_ids = [r[0] for r in conn.execute(
+        "SELECT id FROM messages WHERE conversation_id=? ORDER BY idx", (conv_id,)
+    ).fetchall()]
+    assert seg["start_message_id"] == new_msg_ids[0]
+    assert seg["end_message_id"] == new_msg_ids[1]
+
+
+def test_upsert_preserves_assertions_on_update(db):
+    """Assertions (with re-mapped message IDs) survive a conversation update."""
+    conv_id, _ = _seed_segments_and_assertions(db)
+
+    from app.parsers.base import ParsedConversation, ParsedMessage
+    updated = ParsedConversation(
+        source="chatgpt", source_id="preserve-test",
+        title="preserve test",
+        messages=[
+            ParsedMessage(role="user", text="Hello world v2", created_at="2025-01-01T00:00:00Z"),
+            ParsedMessage(role="assistant", text="Hi there v2", created_at="2025-01-01T00:01:00Z"),
+        ],
+        created_at="2025-01-01T00:00:00Z", updated_at="2025-01-01T00:01:30Z",
+    )
+    db.upsert_conversations([updated])
+
+    conn = db.connect()
+    seg = conn.execute("SELECT id FROM segments WHERE conversation_id=?", (conv_id,)).fetchone()
+    assertions = db.list_assertions(segment_id=seg["id"])
+    assert len(assertions) == 1
+    assert assertions[0]["text"] == "Some fact."
+
+    # supporting_message_ids must point to new message IDs.
+    new_msg_ids = [r[0] for r in conn.execute(
+        "SELECT id FROM messages WHERE conversation_id=? ORDER BY idx", (conv_id,)
+    ).fetchall()]
+    supp = json.loads(assertions[0]["supporting_message_ids"])
+    assert supp == [new_msg_ids[1]]  # was idx=1 (assistant), still idx=1
+
+
+def test_upsert_drops_segments_past_new_end(db):
+    """Segments whose bounds exceed the new (shorter) conversation are silently dropped."""
+    conv_id, old_msg_ids = _seed_segments_and_assertions(db)
+
+    from app.parsers.base import ParsedConversation, ParsedMessage
+    shorter = ParsedConversation(
+        source="chatgpt", source_id="preserve-test",
+        title="preserve test",
+        messages=[
+            ParsedMessage(role="user", text="Only one message now", created_at="2025-01-01T00:00:00Z"),
+        ],
+        created_at="2025-01-01T00:00:00Z", updated_at="2025-01-01T00:00:30Z",
+    )
+    db.upsert_conversations([shorter])
+
+    # Original segment spans idx 0→1 but new conv only has idx 0.
+    segs = db.list_segments(conversation_id=conv_id)
+    assert len(segs) == 0, "segment spanning beyond new end must be dropped"

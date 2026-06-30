@@ -93,9 +93,9 @@ def make_conv(source_id="c1", text="本文テキスト", source="chatgpt",
     )
 
 
-def test_fresh_db_has_embeddings_table_at_v6(db):
+def test_fresh_db_has_embeddings_table(db):
     conn = db.connect()
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] >= 6
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     assert "embeddings" in tables

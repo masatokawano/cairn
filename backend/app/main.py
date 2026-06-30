@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import cli_sync, db
 from .parsers import PARSER_VERSION, FileTooLargeError, UnknownFormatError, parse_upload
@@ -208,6 +209,140 @@ def import_runs(
     limit: int = Query(50, le=500), offset: int = 0, source: str | None = None
 ):
     return {"results": db.list_import_runs(limit=limit, offset=offset, source=source)}
+
+
+# ---------------------------------------------------------------------------
+# Extractions API (P3-E)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/conversations/{conv_id}/extractions")
+def get_extractions(conv_id: int):
+    """Return segments and assertions for a conversation."""
+    conv = db.get_conversation(conv_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    import json
+    segments = db.list_segments(conversation_id=conv_id)
+    for seg in segments:
+        seg["assertions"] = db.list_assertions(segment_id=seg["id"])
+        for a in seg["assertions"]:
+            try:
+                a["supporting_message_ids"] = json.loads(a["supporting_message_ids"] or "[]")
+            except Exception:
+                a["supporting_message_ids"] = []
+    return {"segments": segments}
+
+
+class SegmentPatch(BaseModel):
+    title: str | None = None
+    summary: str | None = None
+    topics: list[str] | None = None
+
+
+@app.patch("/api/segments/{seg_id}")
+def patch_segment(seg_id: int, body: SegmentPatch):
+    import json as _json
+    from datetime import datetime, timezone
+    conn = db.connect()
+    row = conn.execute("SELECT id FROM segments WHERE id=?", (seg_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="segment not found")
+    updates: dict = {}
+    if body.title is not None:
+        updates["title"] = body.title[:500]
+    if body.summary is not None:
+        updates["summary"] = body.summary[:5000]
+    if body.topics is not None:
+        updates["topics"] = _json.dumps(body.topics, ensure_ascii=False)
+    if not updates:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    updates["locked_by_user"] = 1
+    updates["user_edited_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    with conn:
+        conn.execute(
+            f"UPDATE segments SET {set_clause} WHERE id=?",
+            list(updates.values()) + [seg_id],
+        )
+    return {"ok": True}
+
+
+@app.delete("/api/segments/{seg_id}")
+def delete_segment(seg_id: int):
+    conn = db.connect()
+    row = conn.execute("SELECT id FROM segments WHERE id=?", (seg_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="segment not found")
+    with conn:
+        conn.execute("DELETE FROM segments WHERE id=?", (seg_id,))
+    return {"ok": True}
+
+
+class AssertionPatch(BaseModel):
+    text: str | None = None
+    actor: str | None = None
+    kind: str | None = None
+    status: str | None = None
+    confidence: float | None = None
+
+
+_VALID_ACTORS = {"user", "assistant", "shared"}
+_VALID_KINDS = {"claim", "hypothesis", "conclusion", "decision",
+                "rejected_idea", "question", "todo"}
+_VALID_STATUSES = {"tentative", "accepted", "rejected", "superseded",
+                   "unresolved", "completed"}
+
+
+@app.patch("/api/assertions/{assertion_id}")
+def patch_assertion(assertion_id: int, body: AssertionPatch):
+    from datetime import datetime, timezone
+    conn = db.connect()
+    row = conn.execute("SELECT id FROM assertions WHERE id=?", (assertion_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="assertion not found")
+    updates: dict = {}
+    if body.text is not None:
+        if not body.text.strip():
+            raise HTTPException(status_code=422, detail="text cannot be empty")
+        updates["text"] = body.text[:2000]
+    if body.actor is not None:
+        if body.actor not in _VALID_ACTORS:
+            raise HTTPException(status_code=422, detail=f"actor must be one of {sorted(_VALID_ACTORS)}")
+        updates["actor"] = body.actor
+    if body.kind is not None:
+        if body.kind not in _VALID_KINDS:
+            raise HTTPException(status_code=422, detail=f"kind must be one of {sorted(_VALID_KINDS)}")
+        updates["kind"] = body.kind
+    if body.status is not None:
+        if body.status not in _VALID_STATUSES:
+            raise HTTPException(status_code=422, detail=f"status must be one of {sorted(_VALID_STATUSES)}")
+        updates["status"] = body.status
+    if body.confidence is not None:
+        if not (0.0 <= body.confidence <= 1.0):
+            raise HTTPException(status_code=422, detail="confidence must be 0.0–1.0")
+        updates["confidence"] = body.confidence
+    if not updates:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    updates["locked_by_user"] = 1
+    updates["user_edited_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    with conn:
+        conn.execute(
+            f"UPDATE assertions SET {set_clause} WHERE id=?",
+            list(updates.values()) + [assertion_id],
+        )
+    return {"ok": True}
+
+
+@app.delete("/api/assertions/{assertion_id}")
+def delete_assertion(assertion_id: int):
+    conn = db.connect()
+    row = conn.execute("SELECT id FROM assertions WHERE id=?", (assertion_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="assertion not found")
+    with conn:
+        conn.execute("DELETE FROM assertions WHERE id=?", (assertion_id,))
+    return {"ok": True}
 
 
 # Serve the built frontend if present (production mode: single process).
