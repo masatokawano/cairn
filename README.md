@@ -22,6 +22,28 @@ npm run build
 
 ## 起動
 
+### macOS LaunchAgent（常駐・自動起動）
+
+ログイン時に自動起動し、クラッシュ時に自動再起動する設定が
+`~/Library/LaunchAgents/com.masato.cairn.plist` に登録済み。
+
+```bash
+# 状態確認
+launchctl list | grep com.masato.cairn   # PIDが表示されれば稼働中
+
+# 手動操作
+launchctl stop  com.masato.cairn
+launchctl start com.masato.cairn
+
+# plist を編集した後の再読み込み
+launchctl unload ~/Library/LaunchAgents/com.masato.cairn.plist
+launchctl load   ~/Library/LaunchAgents/com.masato.cairn.plist
+```
+
+ログは `~/Library/Logs/cairn/server.log` / `server-error.log` に出力される。
+
+### 手動起動（開発時）
+
 ```bash
 cd backend
 .venv/bin/uvicorn app.main:app --port 8730
