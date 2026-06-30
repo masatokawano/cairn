@@ -42,6 +42,23 @@ launchctl load   ~/Library/LaunchAgents/com.masato.cairn.plist
 
 ログは `~/Library/Logs/cairn/server.log` / `server-error.log` に出力される。
 
+### ollama（Phase 3 知識抽出用 LLM）
+
+Phase 3 の segment 要約 / assertion 抽出に `ollama` を使用する。
+`~/Library/LaunchAgents/com.masato.ollama.plist` で常駐起動済み（`127.0.0.1:11434`）。
+モデルは idle 5 分で自動アンロードされるため常時メモリ占有はしない。
+
+```bash
+# 状態確認
+launchctl list | grep com.masato.ollama
+
+# 使用モデル（初回のみ pull が必要）
+ollama pull qwen2.5:14b-instruct-q4_K_M   # segment summary 用（~8GB、24 tok/s）
+ollama pull qwen2.5:32b-instruct-q4_K_M   # assertion 抽出用（~18GB、11 tok/s）
+```
+
+ログは `~/Library/Logs/cairn/ollama.log` / `ollama-error.log` に出力される。
+
 ### 手動起動（開発時）
 
 ```bash

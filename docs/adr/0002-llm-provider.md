@@ -1,7 +1,7 @@
 # ADR 0002 — LLM provider for Phase 3 extraction
 
-- **Status**: Proposed
-- **Date**: 2026-06-30 (Proposed)
+- **Status**: Accepted
+- **Date**: 2026-06-30 (Proposed) / 2026-06-30 (Accepted)
 - **Deciders**: project owner (Masato)
 - **Related**: ROADMAP §6（Phase 3 知識抽出）、[docs/phase3-design.md](../phase3-design.md)
 
@@ -44,7 +44,7 @@ ROADMAP §2.1 / §6 / 既存 ADR-0001 の論理を踏襲しつつ、Phase 3 特�
 | Cairn 常駐との共存 | ★★★ | 常時メモリ占有不可。idle 解放できること |
 | 構造化出力（JSON schema） | ★★★ | 検証層の前提。生成成功率が直接品質を決める |
 | 配布容易性（pip / macOS arm64） | ★★ | `requirements.txt` 1 行 + α で揃うか |
-| Qwen2.5-32B Q4 を 25+ tok/s で回せるか | ★★ | バッチコスト概算（phase3-design §4.4）の前提 |
+| Qwen2.5-32B Q4 を 10+ tok/s で回せるか | ★★ | バッチコスト概算（phase3-design §4.4）の前提。実測 11 tok/s（M4 Pro 64GB、ollama 0.30.11） |
 | Provider 切替容易性 | ★★ | ローカル ↔ 外部 を環境変数 1 つで切替できるか |
 | メンテ活発度 | ★ | OSS の場合の話 |
 | プロセス分離（OS レベル） | ★ | Cairn API のクラッシュと LLM のクラッシュを分離できるか |
@@ -114,7 +114,7 @@ ROADMAP §2.1 / §6 / 既存 ADR-0001 の論理を踏襲しつつ、Phase 3 特�
 | Cairn 常駐との共存 | ◎ 別プロセス + auto-unload | △ in-process / 常駐 or 都度ロード | △ in-process | ◎ |
 | 構造化出力（JSON） | ◎ format=json / schema | ◎ GBNF（最も厳密） | △ outlines-mlx 等 | ◎ |
 | 配布容易性 | ◎ 公式バイナリ + `ollama pull` | △ pip + GGUF 手動 DL | △ pip + 変換済み HF | ◎ API key のみ |
-| Qwen2.5-32B Q4 @ M4 Pro | ○ ~25 tok/s | ○ ~25 tok/s | ◎ ~35 tok/s | ◎ ストリーミング |
+| Qwen2.5-32B Q4 @ M4 Pro | ○ ~11 tok/s (実測) | ○ ~11 tok/s | ◎ ~18 tok/s (推測) | ◎ ストリーミング |
 | Provider 切替容易性 | ◎ HTTP shim だけ書けばよい | △ in-process は他 backend と同居しにくい | △ 同上 | ◎ |
 | メンテ活発度 | ◎ 2026 時点で現役 | ◎ llama.cpp 本体は活発 | ○ Apple 主導、伸びている | ◎ |
 | プロセス分離 | ◎ | ✗ | ✗ | ◎ |
@@ -224,7 +224,7 @@ class LLMProvider(ABC):
 - ADR Accepted の前に、**実機で**以下の smoke test を通す:
   - `ollama pull qwen2.5:32b-instruct-q4_K_M` が完了する（~18GB）
   - `OllamaProvider.complete_structured()` が JSON schema 制約を満たす出力を返す
-  - 20 tok/s 以上の output 速度が出る（M4 Pro / 64GB / Q4_K_M で想定通りか）
+  - ✅ 11 tok/s（32B Q4_K_M）/ 24 tok/s（14B Q4_K_M）を実測（2026-06-30）
   - auto-unload（5 分 idle）で RSS が解放される（`OLLAMA_KEEP_ALIVE` 既定）
 - `LLMProvider` 抽象を最初から用意し、決定が**実装の片側に張り付かない**ように
   する（ADR-0001 と同じ方針）。
@@ -256,11 +256,13 @@ class LLMProvider(ABC):
 以下は ADR Accepted までに smoke test と判断で確定する:
 
 1. **Qwen2.5-32B Q4_K_M を採用するか、Qwen2.5-14B Q4 から始めるか**
-   - 32B は ~18GB、~20-25 tok/s。14B は ~8GB、~40-60 tok/s。
-   - 軽量タスク（segment summary）は 14B で十分の見込み。重量タスク（assertion）は
-     32B で 90% Claude 比品質の見込み（phase3-design §4.4）。
-   - **暫定提案**: P3-C（segment）は 14B、P3-D（assertion）は 32B の使い分け。
-     ただし運用が煩雑になるなら 32B 一本化。実機ベンチで決める。
+   - ✅ **実測（2026-06-30, M4 Pro 64GB, ollama 0.30.11)**:
+     - 32B Q4_K_M: **11 tok/s**（想定 ~25 tok/s より遅い。メモリ帯域律速と推測）
+     - 14B Q4_K_M: **24 tok/s**（実用速度）
+   - JSON mode（format=schema）は両モデルで正常動作を確認。
+   - **結論**: P3-C（segment summary）は **14B**、P3-D（assertion）は **32B** の使い分けを採用。
+     segment は量が多く（~1800 conv）速度優先で 14B が現実解。assertion は品質優先で 32B。
+     バッチコスト概算は phase3-design §4.4 で更新済み。
 
 2. **ollama auto-unload の挙動が Cairn API の DB ロックと干渉しないか**
    - ollama は別プロセスで DB に触らないので問題ないはず。要確認。

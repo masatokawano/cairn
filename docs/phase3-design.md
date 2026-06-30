@@ -352,27 +352,33 @@ def extract_with_validation(
 - `admin extract --force --prompt-version=segment-v2` で **locked_by_user=0 の segment
   を v2 で再生成**。
 
-### 4.4 バッチコスト概算（M4 Pro / Qwen2.5-32B Q4_K_M）
+### 4.4 バッチコスト概算（M4 Pro / 実測値ベース、2026-06-30）
 
 実 DB の規模（2026-06-28 時点）:
 - 1813 conversations / 22651 messages / 28611 chunks
 - 平均 ~12.5 messages/conversation
 
-Stage 1（segment summary、Qwen2.5-32B Q4 想定）:
+**実測速度（M4 Pro 64GB、ollama 0.30.11）**:
+- Qwen2.5-14B Q4_K_M: **24 tok/s**（segment summary に採用）
+- Qwen2.5-32B Q4_K_M: **11 tok/s**（assertion extraction に採用）
+- JSON mode（format=schema）は両モデルで正常動作確認済み。
+
+Stage 1（segment summary、**Qwen2.5-14B** Q4_K_M）:
 - 入力: 平均 5000 tokens/conversation
 - 出力: 平均 400 tokens/conversation（summary + topics + segment 境界）
-- 速度: ~25 tok/s output（実機計測前の見積もり）
-- 推定: 1813 conv × (400 / 25) = **約 8 時間**で全件初回処理
+- 推定: 1813 conv × (400 / 24) = **約 8.4 時間**で全件初回処理
 - 夜間バッチ 1 回で完了。以後は新規分のみ。
 
-Stage 2（assertion extraction、同じく 32B）:
+Stage 2（assertion extraction、**Qwen2.5-32B** Q4_K_M）:
 - 入力: segment 単位（平均 5 segments/conv と仮定）→ 平均 1500 tokens/segment
 - 出力: 平均 600 tokens/segment（assertion 5-10 件 + 検証フィールド）
-- 推定: 1813 × 5 × (600 / 25) = **約 60 時間**で全件初回処理
+- 推定: 1813 × 5 × (600 / 11) = **約 136 時間**で全件初回処理
 - これは大きい。**初回は新しい順 N 件に限定**するか、**段階的（夜間複数回に分散）**を
   デフォルトにする。`--limit-conversations=N` / `--since=DATE` を CLI で提供。
 
-> 上記は概算。v1 実装後に**実機ベンチマーク**して数字を更新する（§7.3）。
+> Stage 2 の全件処理は非現実的（136 時間 ≈ 6 日間）。実運用では「直近 30 日分」
+> または「重要フラグを立てた会話のみ」など、スコープ絞りを前提とする。
+> `--since=DATE` と `--source=X` の組合せで段階的に拡大していく。
 
 ### 4.5 抽出の入力フォーマット
 
