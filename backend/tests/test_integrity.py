@@ -77,6 +77,61 @@ def test_detects_blank_source(db):
     assert report["checks"]["blank_source_or_source_id"] == 1
 
 
+def test_clean_db_reports_items_checks(db):
+    """M0: a healthy DB reports every conversation mirrored into items,
+    every chunk carrying an item_id, and no drift."""
+    db.upsert_conversations([make_conv(db), make_conv(db, "c2")])
+    report = db.integrity_check()
+    assert report["ok"] is True
+    checks = report["checks"]
+    assert checks["conversations_missing_item"] == 0
+    assert checks["chunks_missing_item_id"] == 0
+    assert checks["items_without_conversation"] == 0
+    assert checks["items_conversation_drift"] == 0
+
+
+def test_detects_conversation_without_item(db):
+    """A conversation without its items row is a hard problem — cross-source
+    RRF would silently drop it. FK is disabled here to inject the drift the
+    integrity check is meant to spot."""
+    db.upsert_conversations([make_conv(db)])
+    conn = db.connect()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    with conn:
+        conn.execute("UPDATE chunks SET item_id = NULL")  # break the FK dep first
+        conn.execute("DELETE FROM items WHERE source='chatgpt' AND external_id='c1'")
+    conn.execute("PRAGMA foreign_keys = ON")
+    report = db.integrity_check()
+    assert report["ok"] is False
+    assert report["checks"]["conversations_missing_item"] == 1
+    assert any("without a matching items row" in p for p in report["problems"])
+
+
+def test_detects_chunks_missing_item_id(db):
+    """A NULL chunks.item_id after backfill is a hard problem."""
+    db.upsert_conversations([make_conv(db)])
+    conn = db.connect()
+    with conn:
+        conn.execute("UPDATE chunks SET item_id = NULL")
+    report = db.integrity_check()
+    assert report["ok"] is False
+    assert report["checks"]["chunks_missing_item_id"] >= 1
+    assert any("NULL item_id" in p for p in report["problems"])
+
+
+def test_reports_items_conversation_drift_as_info(db):
+    """redact-apply-style direct edits to conversations show up as drift.
+    Info only (not appended to problems): admin.py stays frozen through M5
+    per DESIGN.md §5.7."""
+    db.upsert_conversations([make_conv(db)])
+    conn = db.connect()
+    with conn:
+        conn.execute("UPDATE conversations SET title='別のタイトル' WHERE id=1")
+    report = db.integrity_check()
+    assert report["ok"] is True  # drift is info-only
+    assert report["checks"]["items_conversation_drift"] == 1
+
+
 def test_admin_command_exit_codes(db, capsys):
     import json
     from app import admin

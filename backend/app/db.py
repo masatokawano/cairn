@@ -744,6 +744,44 @@ def _restore_derived_data(
             )
 
 
+def _ensure_item_for_conversation(conn: sqlite3.Connection, conv_id: int) -> int:
+    """Upsert an items(kind='conversation') row mirroring the conversations row
+    and return items.id.
+
+    Called from the insert/update paths of upsert_conversations() and from
+    rechunk_messages() (which self-heals if a legacy DB is missing the items
+    row). The skip path — content_hash unchanged — deliberately does NOT call
+    this: the migration or a prior upsert already populated the row and
+    re-writing the same values on every no-op sync would be pure churn.
+
+    admin.redact-apply mutates conversations.{title,content_hash} directly and
+    bypasses this helper; integrity_check surfaces the resulting drift as an
+    info-only count (admin.py is frozen through M5, DESIGN.md §5.7).
+    """
+    row = conn.execute(
+        "SELECT source, source_id, title, created_at, updated_at, content_hash, meta"
+        " FROM conversations WHERE id = ?",
+        (conv_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"conversation id {conv_id} not found")
+    cur = conn.execute(
+        """INSERT INTO items
+             (kind, source, external_id, title, created_at, updated_at, content_hash, meta)
+           VALUES ('conversation', ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(source, external_id) DO UPDATE SET
+             title        = excluded.title,
+             created_at   = excluded.created_at,
+             updated_at   = excluded.updated_at,
+             content_hash = excluded.content_hash,
+             meta         = excluded.meta
+           RETURNING id""",
+        (row["source"], row["source_id"], row["title"], row["created_at"],
+         row["updated_at"], row["content_hash"], row["meta"]),
+    )
+    return cur.fetchone()[0]
+
+
 def upsert_conversations(parsed_list) -> dict:
     """Diff import: insert new, replace changed, skip unchanged conversations.
 
@@ -791,6 +829,10 @@ def upsert_conversations(parsed_list) -> dict:
                 )
                 conv_id = cur.lastrowid
                 stats["inserted"] += 1
+            # Mirror the conversation into items (M0). Every insert/update path
+            # touches it; the skip path above deliberately does not (see helper
+            # docstring). chunks.item_id is populated from this value below.
+            item_id = _ensure_item_for_conversation(conn, conv_id)
             # messages are re-inserted on every update; attachments hang off
             # message_id via FK CASCADE, so the previous attachments were
             # already wiped when the messages were deleted above.
@@ -806,7 +848,7 @@ def upsert_conversations(parsed_list) -> dict:
                 # Messages were freshly inserted (new ids), so no prior chunks
                 # exist for them — any old ones were CASCADE-deleted with the
                 # messages above. Generate at the current version.
-                _store_chunks(conn, cur.lastrowid, conv_id, m.text, CURRENT_CHUNKING_VERSION)
+                _store_chunks(conn, cur.lastrowid, conv_id, m.text, CURRENT_CHUNKING_VERSION, item_id)
             # Re-link segments and assertions to new message IDs (update only).
             if captured is not None:
                 _restore_derived_data(conn, conv_id, captured, msg_ids)
@@ -852,20 +894,26 @@ def _store_chunks(
     conversation_id: int,
     text: str,
     chunking_version: str,
+    item_id: int,
 ) -> int:
     """Chunk one message's text and insert the rows. Caller owns the transaction.
-    Returns the number of chunks stored (0 for empty/whitespace text)."""
+    Returns the number of chunks stored (0 for empty/whitespace text).
+
+    item_id (v11) is required — every chunk carries its cross-source join key.
+    Making it a positional required arg surfaces missing wiring at call sites
+    instead of silently writing NULLs that later fail integrity_check."""
     chunks = chunk_text(text)
     if not chunks:
         return 0
     now = utcnow_iso()
     conn.executemany(
         "INSERT INTO chunks"
-        " (message_id, conversation_id, idx, start_offset, end_offset, text, kind, chunking_version, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
+        " (message_id, conversation_id, idx, start_offset, end_offset, text,"
+        "  kind, chunking_version, created_at, item_id)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
         [
             (message_id, conversation_id, c.idx, c.start_offset, c.end_offset,
-             c.text, "message_text", chunking_version, now)
+             c.text, "message_text", chunking_version, now, item_id)
             for c in chunks
         ],
     )
@@ -891,6 +939,10 @@ def rechunk_messages(
     chunking_version = chunking_version or CURRENT_CHUNKING_VERSION
     conn = connect()
     stats = {"messages": 0, "chunks": 0, "skipped": 0}
+    # conversation_id -> items.id. Cached across rows so we don't run the upsert
+    # once per message; also self-heals a legacy DB where the items row for a
+    # conversation is missing (raw-SQL test fixtures, hand-edited state).
+    item_id_by_conv: dict[int, int] = {}
     with conn:
         if message_ids is None:
             rows = conn.execute(
@@ -917,7 +969,11 @@ def rechunk_messages(
                     "DELETE FROM chunks WHERE message_id=? AND chunking_version=?",
                     (row["id"], chunking_version),
                 )
-            n = _store_chunks(conn, row["id"], row["conversation_id"], row["text"], chunking_version)
+            conv_id = row["conversation_id"]
+            if conv_id not in item_id_by_conv:
+                item_id_by_conv[conv_id] = _ensure_item_for_conversation(conn, conv_id)
+            n = _store_chunks(conn, row["id"], conv_id, row["text"],
+                              chunking_version, item_id_by_conv[conv_id])
             stats["messages"] += 1
             stats["chunks"] += n
     return stats
@@ -2154,6 +2210,62 @@ def integrity_check() -> dict:
         checks["orphan_embeddings"] = orphan_embeddings
         if orphan_embeddings:
             problems.append(f"{orphan_embeddings} orphan embeddings")
+
+    # M0: items registry consistency (only if the table exists — pre-v11 DBs).
+    has_items = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='items'"
+    ).fetchone()[0]
+    if has_items:
+        # (i) Every conversation must have an items row. Missing rows would
+        # stall cross-source RRF and break M1's URL/DOI joins. Hard problem.
+        conv_without_item = conn.execute(
+            "SELECT COUNT(*) FROM conversations c "
+            "LEFT JOIN items i "
+            "  ON i.source = c.source AND i.external_id = c.source_id "
+            "WHERE i.id IS NULL"
+        ).fetchone()[0]
+        checks["conversations_missing_item"] = conv_without_item
+        if conv_without_item:
+            problems.append(
+                f"{conv_without_item} conversations without a matching items row"
+            )
+
+        # (ii) Every chunk must resolve to an items row (item_id NOT NULL).
+        # NULL means either the v11 backfill missed it or an ingest bypassed
+        # _ensure_item_for_conversation; either way, cross-source join breaks.
+        if has_chunks:
+            chunks_missing_item_id = conn.execute(
+                "SELECT COUNT(*) FROM chunks WHERE item_id IS NULL"
+            ).fetchone()[0]
+            checks["chunks_missing_item_id"] = chunks_missing_item_id
+            if chunks_missing_item_id:
+                problems.append(
+                    f"{chunks_missing_item_id} chunks with NULL item_id"
+                )
+
+        # (iii) items(kind='conversation') rows whose conversation is gone —
+        # info only. No delete path for conversations exists today; this is a
+        # forward-looking detector for whenever one lands.
+        item_without_conv = conn.execute(
+            "SELECT COUNT(*) FROM items i "
+            "LEFT JOIN conversations c "
+            "  ON c.source = i.source AND c.source_id = i.external_id "
+            "WHERE i.kind = 'conversation' AND c.id IS NULL"
+        ).fetchone()[0]
+        checks["items_without_conversation"] = item_without_conv
+
+        # (iv) items vs conversations title/content_hash drift — info only.
+        # admin.redact-apply mutates conversations directly (see helper
+        # docstring). admin.py is frozen through M5, DESIGN.md §5.7, so this
+        # is observed, not fixed at ingest time.
+        drift = conn.execute(
+            "SELECT COUNT(*) FROM items i "
+            "JOIN conversations c "
+            "  ON c.source = i.source AND c.source_id = i.external_id "
+            "WHERE i.kind = 'conversation' "
+            "  AND (i.title IS NOT c.title OR i.content_hash IS NOT c.content_hash)"
+        ).fetchone()[0]
+        checks["items_conversation_drift"] = drift
 
     # 8b. Attachment blob store (P1-J): compare hashes in the attachments
     # table against bytes on disk. Two failure modes worth surfacing:
