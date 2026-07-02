@@ -234,6 +234,66 @@ Host/Origin が localhost 以外のリクエストはミドルウェアが拒否
 
 詳細は [SECURITY.md](SECURITY.md) を参照してください。
 
+## `cairn` CLI（M0 骨格）
+
+`backend/bin/cairn` は typer 製の CLI ラッパーで、統合層のサブコマンドを 1 本にまとめる
+入口。M0 では骨格のみで、`sync conversations`（既存 CLI ログ同期）だけが実装済み。
+残り（`sync karakeep|zotero|obsidian|all`、`review weekly`、`index rebuild`）は
+DESIGN.md §7 の M1〜M4 で順次実装され、それまでは実装先マイルストーンを添えて
+exit 1 で失敗する。
+
+```bash
+# PATH に通すには（推奨）:
+ln -s /abs/path/to/cairn/backend/bin/cairn ~/bin/cairn
+cairn --help
+
+# 直接叩く場合:
+/path/to/cairn/backend/bin/cairn sync conversations
+```
+
+editable install（`pip install -e .` で `cairn` を PATH に登録）は M6 で検討する。
+
+## M0 スキーマ適用手順（実 DB を v10 → v11 に上げる）
+
+M0 で `_SCHEMA_VERSION` が 10 → 11 になり、`items` / `item_links` / `sync_state` の
+追加と、既存 conversations の items バックフィルが走る。運用中の `cairn.db` に
+適用する手順:
+
+1. **稼働中サービスを止める**（旧コードが新スキーマの DB を開くのは additive なので
+   安全だが、順序として停止 → migrate が確実）:
+
+   ```bash
+   launchctl stop com.masato.cairn
+   ```
+
+2. **実 DB のコピーへドライラン**（migration 自体が自動 backup を取るが、
+   その前に安全側のコピーを作る）:
+
+   ```bash
+   cd backend
+   .venv/bin/python -m app.admin backup   # cairn.db.backup-<日時>
+   CAIRN_DB=data/cairn.db.backup-XXXXXX .venv/bin/python -m app.admin integrity-check
+   # → v11 migration がコピー上で成功し、items 件数 == conversations 件数、
+   #   chunks_missing_item_id=0、ok:true を確認
+   ```
+
+3. **本 DB へ適用**（`connect()` が v11 migration を走らせ、premigrate バックアップも
+   自動で作る）:
+
+   ```bash
+   .venv/bin/python -m app.admin integrity-check
+   # 期待: ok:true / conversations_missing_item=0 / chunks_missing_item_id=0
+   ```
+
+4. **サービス再起動**:
+
+   ```bash
+   launchctl start com.masato.cairn
+   ```
+
+5. **クリーンアップ**: `data/cairn.db.premigrate-v10-to-v11-*` と手動 backup は
+   会話本文を平文で含む。動作確認後に削除する。
+
 ## テスト
 
 ```bash

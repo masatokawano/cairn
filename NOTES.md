@@ -345,3 +345,24 @@
   取り込みデータ由来XSSのリスクは低い。
 - frontend は `npm audit` で既知脆弱性0件を確認済み。backend は `pip check` はOKだが、
   Python脆弱性監査ツールは未導入。
+
+## M0 モジュール骨格の意図的逸脱（DESIGN.md §3 との差分）
+
+DESIGN.md §3 は `backend/app/` 直下に `parsers/ connectors/ core/ index/ recall/
+deliver/ mcp/ cli.py` の骨格を挙げているが、M0 では以下 2 箇所を意図的にずらして
+いる。§3 冒頭の「既存構造に合わせて調整可」に沿った判断で、非目標への逸脱では
+ないが、レビュー時に「§3 と食い違っている」と誤検知されないよう記録する。
+
+- **`app/index/` は作らない**: 既存の `chunking.py` / `embedding/` /
+  `vector_index.py` が該当する。DESIGN.md §3 も「chunking/embedding/FTS/RRF を
+  items 対応に一般化」と書いており、新パッケージ導入ではなく既存モジュールの
+  拡張が本旨。M1〜M2 で items 対応を進める際もこれらのモジュールに手を入れる。
+- **`app/mcp/` を M0 では作らない（M5 まで延期）**: `mcp_server.py` は 26 行目で
+  `from mcp.server.fastmcp import FastMCP` として MCP SDK を絶対 import する。
+  README（`claude mcp add`）が推奨する登録方法は**スクリプトパス直接実行**
+  （`python .../backend/app/mcp_server.py`）で、この起動時 Python はスクリプトの
+  ディレクトリ（= `backend/app/`）を `sys.path[0]` に積む。`backend/app/mcp/`
+  ディレクトリを新設した瞬間、`import mcp` が SDK ではなくローカルパッケージへ
+  解決されて MCP サーバが起動不能になる。稼働中のユーザー MCP を壊す代償は
+  §3 との名前一致より重い。M5（MCP サーバ統合）で `mcp_server.py` を廃止し
+  `python -m app.<新名>` 形式へ移す際に、起動方式ごと解決する。

@@ -1,0 +1,9 @@
+#!/bin/sh
+# `cairn` entry point (M0 skeleton). Sets PYTHONPATH so `app.cli` imports
+# resolve against this checkout, then execs the venv's python. Installing as
+# a proper console_script (pyproject.toml) is deferred to M6.
+#
+# Usage: symlink into $PATH, e.g. `ln -s /abs/path/backend/bin/cairn ~/bin/cairn`.
+set -e
+BACKEND="$(cd "$(dirname "$0")/.." && pwd)"
+exec env PYTHONPATH="$BACKEND" "$BACKEND/.venv/bin/python" -m app.cli "$@"
