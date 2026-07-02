@@ -114,9 +114,17 @@ def test_migration_creates_import_runs_on_pre_v2_db(client, tmp_path):
     c, db, _ = client
     db.connect()
     # Simulate a genuine pre-v2 DB: no import_runs table and no later columns,
-    # version rolled back to 1 (so migrations v2 and v3 both run on reopen).
+    # version rolled back to 1 (so migrations v2 through v11 all run on reopen).
+    # A pre-v2 shape has none of the v11 items registry either — drop those
+    # artefacts too so migration 11's non-idempotent ALTER TABLE does not
+    # collide with the pre-existing item_id column on the fresh build.
     conn = db.connect()
     with conn:
+        conn.execute("DROP INDEX IF EXISTS idx_chunks_item")
+        conn.execute("ALTER TABLE chunks DROP COLUMN item_id")
+        conn.execute("DROP TABLE IF EXISTS item_links")
+        conn.execute("DROP TABLE IF EXISTS items")
+        conn.execute("DROP TABLE IF EXISTS sync_state")
         conn.execute("DROP TABLE import_runs")
         conn.execute("ALTER TABLE messages DROP COLUMN source_message_id")
         conn.execute("PRAGMA user_version = 1")

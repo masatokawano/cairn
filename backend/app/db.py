@@ -120,13 +120,60 @@ CREATE TABLE IF NOT EXISTS import_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
 
+-- Item registry (v11, DESIGN.md §4): cross-source registry over conversations,
+-- bookmarks (karakeep, M1), references (zotero, M1), and notes (obsidian, M3).
+-- Search / recall / linking all pivot on items. Kind-specific detail lives in
+-- the per-kind tables (conversations here; future karakeep/zotero/obsidian
+-- item tables under M1/M3).
+CREATE TABLE IF NOT EXISTS items (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note')),
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    title TEXT,
+    url TEXT,
+    url_norm TEXT,
+    doi TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    content_hash TEXT,
+    meta TEXT,
+    UNIQUE (source, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_items_url_norm ON items(url_norm) WHERE url_norm IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_doi      ON items(doi)      WHERE doi IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_updated  ON items(kind, updated_at);
+
+-- Strong-match links between items (v11, DESIGN.md §5 D5): URL/DOI/GitHub
+-- exact matches after normalisation. Only these three link types are stored;
+-- same-source similarity is computed at query time via RRF and never persisted.
+-- The a_id < b_id check keeps each undirected pair as a single row.
+CREATE TABLE IF NOT EXISTS item_links (
+    a_id     INTEGER NOT NULL REFERENCES items(id),
+    b_id     INTEGER NOT NULL REFERENCES items(id),
+    link_via TEXT NOT NULL CHECK (link_via IN ('url','doi','github')),
+    PRIMARY KEY (a_id, b_id, link_via),
+    CHECK (a_id < b_id)
+);
+
+-- External-source sync cursors (v11, DESIGN.md §4): replaces the legacy
+-- brain-sync state.json files. Populated by connectors under M1/M3.
+CREATE TABLE IF NOT EXISTS sync_state (
+    source     TEXT PRIMARY KEY,
+    cursor     TEXT NOT NULL,
+    synced_at  TEXT NOT NULL,
+    last_error TEXT
+);
+
 -- Chunks (P2-1a): derived units of message text for semantic search. A message
 -- is one chunk unless it exceeds the chunking window, in which case it is split
 -- (see app/chunking.py). Each row records char offsets into the original
 -- message.text so the source span is recoverable. Chunks are derived data:
 -- droppable and regenerable from messages via rechunk_messages(). The
 -- chunking_version column lets a new algorithm's chunks coexist with the old
--- during a staged re-generation.
+-- during a staged re-generation. item_id (v11) is the cross-source join key;
+-- for pre-M1 chunks all items are kind='conversation' and item_id maps 1:1 to
+-- conversation_id via items(source, external_id).
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY,
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -137,11 +184,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     text TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'message_text',  -- "message_text" | "attachment_text"
     chunking_version TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    item_id INTEGER REFERENCES items(id)  -- v11; NULL until backfill / next upsert
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_msg ON chunks(message_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
+CREATE INDEX IF NOT EXISTS idx_chunks_item ON chunks(item_id);
 
 -- Embeddings (P2-1b): one vector per (chunk, provider, model). Vectors live
 -- as f32 little-endian BLOBs; dimension is stored per row so a query knows
@@ -299,6 +348,13 @@ CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
 #                   ADD COLUMN, backfills). Append a step and bump
 #                   _SCHEMA_VERSION together. When a migration runs, a backup
 #                   of the DB is taken first.
+#
+# Order in connect(): existing DBs run _MIGRATIONS *before* _SCHEMA (see
+# connect() below). _SCHEMA-after-migrations means the latest shape may
+# reference tables/columns that only exist after migrations complete
+# (e.g. v11's idx_chunks_item ON chunks.item_id). Reversing this order —
+# _SCHEMA first — would fail on any pre-latest DB the moment a new index in
+# _SCHEMA points at a not-yet-migrated column.
 _MIGRATION_3_MSG_SOURCE_ID = (
     "ALTER TABLE messages ADD COLUMN source_message_id TEXT;"
 )
@@ -450,7 +506,65 @@ CREATE INDEX IF NOT EXISTS idx_entity_mentions_conv ON entity_mentions(conversat
 CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON entity_mentions(entity_id);
 """
 
-_SCHEMA_VERSION = 10
+# Migration 11 (DESIGN.md §4, M0): add items registry, item_links, sync_state,
+# and chunks.item_id. Backfill items rows for every existing conversation and
+# link each existing chunk to its item. All statements are wrapped in a single
+# BEGIN/COMMIT so a partial failure rolls back cleanly — this is the first
+# migration containing a non-idempotent ALTER (duplicate-column would otherwise
+# permanently jam re-runs). The IF NOT EXISTS / WHERE NOT EXISTS / IS NULL
+# guards are additional safety nets; correctness relies on the transaction.
+_MIGRATION_11_ITEMS = """
+BEGIN;
+CREATE TABLE IF NOT EXISTS items (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note')),
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    title TEXT,
+    url TEXT,
+    url_norm TEXT,
+    doi TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    content_hash TEXT,
+    meta TEXT,
+    UNIQUE (source, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_items_url_norm ON items(url_norm) WHERE url_norm IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_doi      ON items(doi)      WHERE doi IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_updated  ON items(kind, updated_at);
+CREATE TABLE IF NOT EXISTS item_links (
+    a_id     INTEGER NOT NULL REFERENCES items(id),
+    b_id     INTEGER NOT NULL REFERENCES items(id),
+    link_via TEXT NOT NULL CHECK (link_via IN ('url','doi','github')),
+    PRIMARY KEY (a_id, b_id, link_via),
+    CHECK (a_id < b_id)
+);
+CREATE TABLE IF NOT EXISTS sync_state (
+    source     TEXT PRIMARY KEY,
+    cursor     TEXT NOT NULL,
+    synced_at  TEXT NOT NULL,
+    last_error TEXT
+);
+ALTER TABLE chunks ADD COLUMN item_id INTEGER REFERENCES items(id);
+CREATE INDEX IF NOT EXISTS idx_chunks_item ON chunks(item_id);
+INSERT INTO items (kind, source, external_id, title, created_at, updated_at, content_hash, meta)
+SELECT 'conversation', c.source, c.source_id, c.title, c.created_at, c.updated_at, c.content_hash, c.meta
+FROM conversations c
+WHERE NOT EXISTS (
+    SELECT 1 FROM items i WHERE i.source = c.source AND i.external_id = c.source_id
+);
+UPDATE chunks
+SET item_id = (
+    SELECT i.id FROM items i
+    JOIN conversations c ON c.id = chunks.conversation_id
+    WHERE i.source = c.source AND i.external_id = c.source_id
+)
+WHERE item_id IS NULL;
+COMMIT;
+"""
+
+_SCHEMA_VERSION = 11
 _MIGRATIONS: list[tuple[int, str]] = [
     (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
     (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
@@ -461,6 +575,7 @@ _MIGRATIONS: list[tuple[int, str]] = [
     (8, _MIGRATION_8_ENTITIES),          # add entities + entity_mentions to pre-v8 DBs (P3-B)
     (9, _MIGRATION_9_SEGMENTS),          # add segments table to pre-v9 DBs (P3-C)
     (10, _MIGRATION_10_ASSERTIONS),      # add assertions table to pre-v10 DBs (P3-D)
+    (11, _MIGRATION_11_ITEMS),           # add items/item_links/sync_state + chunks.item_id (M0, DESIGN.md §4)
 ]
 
 
@@ -540,15 +655,18 @@ def connect() -> sqlite3.Connection:
         # A fresh DB (no tables yet) is built from the latest _SCHEMA and
         # stamped directly — it must NOT run migrations meant for older shapes.
         # An existing DB (tables present, possibly pre-versioning at v0) is
-        # migrated up to _SCHEMA_VERSION.
+        # migrated up to _SCHEMA_VERSION *before* _SCHEMA runs (see the note
+        # above _MIGRATIONS): _SCHEMA may assume columns/tables that only
+        # exist once pending migrations have applied.
         is_fresh = conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
         ).fetchone()[0] == 0
-        conn.executescript(_SCHEMA)
         if is_fresh:
+            conn.executescript(_SCHEMA)
             conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
         else:
             _apply_migrations(conn, db_path)
+            conn.executescript(_SCHEMA)
         _restrict_permissions(db_path)
         _local.conn = conn
     return conn

@@ -90,9 +90,17 @@ def test_source_message_id_persisted_and_returned(db):
 def test_migration_adds_source_message_id_to_pre_v3_db(db):
     # build the DB, then simulate a pre-v3 shape: drop the column by rebuilding
     # messages without it and roll user_version back to 2.
+    # A pre-v3 shape has none of the v11 items registry either — drop those
+    # artefacts too so migration 11's non-idempotent ALTER TABLE does not
+    # collide with the pre-existing item_id column on the fresh build.
     db.upsert_conversations([make_conv(db)])
     conn = db.connect()
     with conn:
+        conn.execute("DROP INDEX IF EXISTS idx_chunks_item")
+        conn.execute("ALTER TABLE chunks DROP COLUMN item_id")
+        conn.execute("DROP TABLE IF EXISTS item_links")
+        conn.execute("DROP TABLE IF EXISTS items")
+        conn.execute("DROP TABLE IF EXISTS sync_state")
         conn.execute("ALTER TABLE messages DROP COLUMN source_message_id")
         conn.execute("PRAGMA user_version = 2")
     conn.close()
