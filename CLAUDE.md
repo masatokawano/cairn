@@ -1,48 +1,54 @@
-# CLAUDE.md
+# AGENTS.md
 
-Cairn — AI 会話アーカイブ（FastAPI + React + SQLite FTS5 + sqlite-vec + ollama 抽出）と、
-その上の統合層 brainsync（Karakeep / Cairn / Zotero / Obsidian を束ね、Obsidian へ
-週次レビューと自動一覧を出力）の monorepo。すべてローカル完結。
+Cairn — AI 会話アーカイブを核に、Karakeep（発見）/ Zotero（根拠）/ Obsidian（理解）を
+横断索引する個人用外部脳プラットフォーム（FastAPI + React + SQLite FTS5 + sqlite-vec + ollama）。
+すべてローカル完結。設計の正典は **docs/DESIGN.md**（v1.1）。
 
-> この内容は AGENTS.md と同一に保つこと。片方だけ更新してはならない。
+> この内容は CLAUDE.md と同一に保つこと。片方だけ更新してはならない。
+> 本文書と docs/DESIGN.md が矛盾したら DESIGN.md が正。
 
-**作業前に必ず `NOTES.md` を読むこと。** ログ形式の癖・FTS5 のハマりどころ・
-外部 API（Karakeep / Zotero）の癖が記録してある。学んだことは NOTES.md に追記する。
+**作業前に必ず読む:** docs/DESIGN.md（特に §2 Decision Record と §8 非目標）、NOTES.md。
+学んだことは NOTES.md に追記する。
 
 ## 構成
 
-- `backend/app/parsers/` — ソース別パーサー（chatgpt / claude_export / gemini / claude_cli / codex_cli）
-- `backend/app/db.py` — スキーマ・migration・差分インポート・検索（FTS5 trigram + LIKE フォールバック + hybrid/RRF）
-- `backend/app/extraction/` — Phase 3 知識抽出（segment / assertion、ollama 経由）
-- `backend/app/mcp_server.py` — read-only MCP（STDIO）
-- `backend/app/main.py` — FastAPI（127.0.0.1:8730、frontend/dist も配信）
+- `backend/app/parsers/` — AI 会話の取り込み（chatgpt / claude_export / gemini / claude_cli / codex_cli）
+- `backend/app/db.py` — スキーマ・migration（現行 v10）・差分インポート・検索（FTS5 trigram + hybrid/RRF）
+- `backend/app/connectors/` — Karakeep / Zotero / Obsidian の read-only クライアント（M1, M3）
+- `backend/app/core/urlnorm.py` — URL/DOI 正規化（M1、テスト厚め）
+- `backend/app/recall/` — related() / weekly digest（M4）
+- `backend/app/deliver/` — obsidian_writer / weekly_review（M3, M4）
+- `backend/app/mcp/` — 横断 MCP サーバ（M5）。旧 `app/mcp_server.py` は M5 で統合
+- `backend/app/extraction/` — Phase 3 抽出パイプライン。**凍結中**（DESIGN.md D2 注記）
+- `backend/app/admin.py` — 既存管理 CLI（redact / backup / integrity 等）。温存、M6 で統合検討
 - `frontend/` — Vite + React + TypeScript
-- `brainsync/` — 統合層。connector（cairn_api / karakeep / zotero / obsidian）→ state JSON →
-  markdown レンダリング → Obsidian 出力。CLI は `python -m brainsync <subcommand>`
-- `launchd/` — plist テンプレートと install スクリプト
-- `docs/` — 設計文書・ADR・backlog。`docs/brainsync-design.md` が統合層の思想と構成
+- `legacy/brain-sync/` — 旧 brain-sync（参照専用・修繕禁止・M3 で削除）
+- `ops/launchd/` — plist テンプレート（M3 で `com.masato.cairn.*` 2 本に集約）
 
-## 責務分界（不変条件 — 違反する変更を提案・実装しない）
+## 不変条件（違反する変更を提案・実装しない）
 
-1. `backend/` は `brainsync/` を import しない。依存方向は brainsync → Cairn の一方向のみ。
-2. brainsync は `cairn.db` を直接開かない。Cairn へのアクセスは HTTP API のみ。
-3. brainsync の書き込み先は Obsidian Vault の `External Brain/90 Auto` と
-   `External Brain/40 Reviews/Weekly` のみ。`10 Themes` / `20 Projects` / `50 Decisions`
-   には書き込まない。`40 Reviews/Weekly` の既存ファイルは上書きしない。
-4. 外部由来テキスト（会話タイトル、ブックマークタイトル、タグ、Web 本文）は信頼しない:
-   markdown 出力時は `brainsync.markdown.escape_inline()` を通す。シェルとして評価しない。
-   LLM に処理させる場合はプロンプトインジェクションを信頼境界として扱う。
-5. Cairn の MCP・API は read-only を標準とし、自動処理に削除・送信・公開・外部書き込み権限を与えない。
-6. シークレットは macOS Keychain（`brainsync.secrets` 経由）。config.env・コード・ログに書かない。
-
-分界の変更が必要な場合は、実装ではなく ADR の起草を提案すること
-（`docs/adr/0003-brainsync-integration.md` が現行の決定）。
+1. connectors は read-only。Karakeep / Zotero / 原本会話へ書き込まない。
+2. Obsidian への書き込みは `deliver/obsidian_writer.py` の allowlist 3 箇所のみ
+   （`90 Auto`=上書き可 / `40 Reviews/Weekly`=新規のみ / `00 Inbox/AI Drafts`=新規のみ）。
+   パス検証でトラバーサルを拒否し、テストで強制する。
+3. `conversations` / `messages` 等の原本系テーブルは破壊的変更禁止。migration は追加のみ・
+   実行前バックアップ必須。派生データ（items / chunks / embeddings / 索引）は常に再構築可能に保つ。
+4. 外部由来テキスト（タイトル・本文・タグ）は信頼しない: シェル評価しない、markdown 出力時は
+   エスケープ、LLM へ渡す際は区切りとガード指示を付す。LLM 生成物には provenance ラベル
+   （`generated_by: cairn/<model>/<prompt_version>`）を必ず付与し、MCP 応答では原文と合成を
+   構造的に分離する（DESIGN.md §6.2）。
+5. 秘密情報は macOS Keychain のみ（`brain-sync-karakeep` / `brain-sync-zotero`）。
+   config・ログ・例外メッセージにキーを出さない。
+6. **DESIGN.md §8 の非目標を再提案・再実装しない**（assertion 事前抽出の再開、関係タイプ自動分類、
+   ランキング学習、レビュー繰り越し、原本への書き込み、原本全文の Obsidian 複製 等）。
+   必要になったら実装ではなく Decision Record の改訂を提案する。
+7. `legacy/brain-sync/` は参照専用。修繕・拡張しない。
 
 ## コマンド
 
 ```bash
-# テスト（backend + brainsync を両方回す）
-cd backend && .venv/bin/python -m pytest tests/ ../brainsync/tests -q
+# テスト
+cd backend && .venv/bin/python -m pytest tests/ -q
 
 # Cairn 起動（開発時。常駐は launchd）
 cd backend && .venv/bin/uvicorn app.main:app --port 8730
@@ -50,38 +56,32 @@ cd backend && .venv/bin/uvicorn app.main:app --port 8730
 # フロントエンド再ビルド（UI 変更後に必要）
 cd frontend && npm run build
 
-# brainsync（launchd が定期実行するのと同じ入口）
-.venv/bin/python -m brainsync check cairn      # 接続確認
-.venv/bin/python -m brainsync sync-cairn       # 個別同期
-.venv/bin/python -m brainsync weekly           # 週次レビュー生成（既存週は保護）
+# 統合層 CLI（M0 以降）
+cairn sync [karakeep|zotero|obsidian|conversations|all]
+cairn review weekly [--week 2099-W01]
+cairn index rebuild
+
+# 既存管理 CLI（温存）
+cd backend && .venv/bin/python -m app.admin <subcommand>
 ```
 
-## 方針
+## 作業手順
 
-- パーサーは実データで調整する前提。フォーマット差異に寛容に（壊れた行は warning にして skip）。
-- 原本と派生データを分離する。派生（chunk / embedding / segment / assertion / state JSON /
-  生成 markdown）は削除・再生成可能に保つ。
-- brainsync の系統間契約は markdown ではなく state JSON と Cairn HTTP API。
-  markdown 出力の構造を変える場合は golden file テストを更新する。
-- スキーマ変更は migration + テスト + 事前バックアップ。破壊的 API 変更は新旧併存期間を設ける。
-
-## 開発ロードマップと作業手順
-
-中長期の設計方針・実装順序・受入基準は `ROADMAP.md`。作業候補は `docs/backlog.md`。
-
-機能追加・設計変更の前に必ず読む: 1. ROADMAP.md 2. NOTES.md 3. SECURITY.md 4. README.md
-（brainsync を触る場合は加えて docs/brainsync-design.md）
-
-- ロードマップ全体を一度に実装しない。明確な受入基準を持つ 1 タスクに限定する。
-- 実装前に: 現状理解・実装対象・変更予定ファイル・schema/API 変更・リスク・テスト計画を提示する。
-- 実装後に: 変更ファイル・実行テストと結果・未解決事項・次の推奨タスクを報告する。
-- 1 コミット 1 目的。自動 commit / push はユーザーが明示的に求めた場合のみ。
+- 作業は DESIGN.md §7 のマイルストーン単位（M0〜M6）。1 セッション = 1 マイルストーン
+  またはその一部。先回り実装をしない。完了条件はテストで示す。
+- 実装前に: 現状理解・実装対象・変更予定ファイル・schema/API 変更・リスク・テスト計画を提示。
+- 実装後に: 変更ファイル・実行テストと結果・未解決事項・次の推奨タスクを報告。
+- コミットはマイルストーン接頭辞（`M1:` 等）。1 コミット 1 目的。
+  自動 commit / push はユーザーが明示的に求めた場合のみ。
+- 文書と実装が食い違ったら、実装ではなくまず文書（DESIGN.md）を直す提案をする。
 
 ## Claude Code / Codex 併用時のレビュー観点
 
-別エージェント（または別セッション）が変更をレビューする際は、通常の観点に加えて必ず確認する:
+別エージェント（または別セッション）によるレビューでは、通常の観点に加えて必ず確認する:
 
-- 責務分界（上記 1〜6）への違反がないか
+- 不変条件 1〜7 への違反がないか（特に書き込み allowlist と read-only 制約）
 - 外部由来テキストが未エスケープで markdown / シェル / プロンプトに流れていないか
-- 派生データの再生成可能性・migration の後方互換が保たれているか
-- テストが受入基準を実際に検証しているか（形式的な pass でないか）
+- provenance ラベルの付与漏れがないか
+- migration の追加のみ原則・バックアップ・再構築可能性が保たれているか
+- DESIGN.md §8 非目標への逸脱（善意の先回り実装を含む）がないか
+- テストが完了条件を実際に検証しているか（形式的な pass でないか）
