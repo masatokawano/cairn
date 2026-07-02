@@ -1,0 +1,43 @@
+[
+  {
+    "key": "KEY1",
+    "version": 100,
+    "data": {
+      "title": "Attention Is All You Need",
+      "itemType": "journalArticle",
+      "dateModified": "2026-07-01T10:00:00Z",
+      "url": "https://example.com/paper",
+      "DOI": "10.1000/xyz",
+      "creators": [
+        {"creatorType": "author", "firstName": "Ashish", "lastName": "Vaswani"},
+        {"creatorType": "author", "name": "Google Brain"}
+      ],
+      "tags": [
+        {"tag": "transformers"},
+        {"tag": "attention"}
+      ]
+    }
+  },
+  {
+    "key": "KEY2",
+    "version": 90,
+    "data": {
+      "title": "",
+      "itemType": "webpage",
+      "dateModified": "2026-06-30T10:00:00Z",
+      "creators": [],
+      "tags": []
+    }
+  },
+  {
+    "key": "KEY3",
+    "version": 80,
+    "data": {
+      "title": "Old item",
+      "itemType": "book",
+      "dateModified": "2026-05-01T10:00:00Z",
+      "creators": [],
+      "tags": []
+    }
+  }
+]

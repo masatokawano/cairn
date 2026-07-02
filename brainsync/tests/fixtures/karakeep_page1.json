@@ -1,0 +1,42 @@
+{
+  "bookmarks": [
+    {
+      "id": "bk_001",
+      "title": "LLM agents survey",
+      "createdAt": "2026-06-28T10:00:00Z",
+      "content": {
+        "type": "link",
+        "url": "https://example.com/llm-agents",
+        "title": "LLM agents survey (page)"
+      },
+      "tags": [
+        {"id": "t1", "name": "to-review"},
+        {"id": "t2", "name": "ai"}
+      ]
+    },
+    {
+      "id": "bk_002",
+      "title": null,
+      "createdAt": "2026-06-27T09:00:00Z",
+      "content": {
+        "type": "link",
+        "url": "https://example.com/untitled",
+        "title": "Content title wins"
+      },
+      "tags": [
+        {"id": "t1", "name": "to-review"}
+      ]
+    },
+    {
+      "id": "bk_003",
+      "title": "no tags yet",
+      "createdAt": "2026-06-26T08:00:00Z",
+      "content": {
+        "type": "link",
+        "url": "https://example.com/new"
+      },
+      "tags": []
+    }
+  ],
+  "nextCursor": "cursor-2"
+}

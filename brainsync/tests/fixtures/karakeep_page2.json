@@ -1,0 +1,28 @@
+{
+  "bookmarks": [
+    {
+      "id": "bk_101",
+      "title": null,
+      "createdAt": "2026-06-20T08:00:00Z",
+      "content": {
+        "type": "link",
+        "url": "https://example.com/older-to-review"
+      },
+      "tags": [
+        {"id": "t1", "name": "to-review"}
+      ]
+    },
+    {
+      "id": "bk_102",
+      "title": "Evil # [x] `rm -rf` | pipe\ntitle",
+      "createdAt": "2026-06-19T08:00:00Z",
+      "content": {
+        "type": "text"
+      },
+      "tags": [
+        {"id": "t9", "name": "misc"}
+      ]
+    }
+  ],
+  "nextCursor": null
+}

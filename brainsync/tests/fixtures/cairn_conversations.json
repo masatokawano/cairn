@@ -1,0 +1,54 @@
+{
+  "results": [
+    {
+      "id": 1,
+      "source": "claude_cli",
+      "title": "Cairn T2 実装",
+      "updated_at": "2026-07-01T12:00:00+00:00",
+      "message_count": 12,
+      "meta": {"cwd": "/home/user/project"}
+    },
+    {
+      "id": 2,
+      "source": "chatgpt",
+      "title": "New chat",
+      "updated_at": "2026-07-01T10:00:00+00:00",
+      "message_count": 10
+    },
+    {
+      "id": 3,
+      "source": "chatgpt",
+      "title": "Review this change for security vulnerabilities. Focus on the diff.",
+      "updated_at": "2026-07-01T09:00:00+00:00",
+      "message_count": 20
+    },
+    {
+      "id": 4,
+      "source": "gemini",
+      "title": "short exchange",
+      "updated_at": "2026-07-01T08:00:00+00:00",
+      "message_count": 3
+    },
+    {
+      "id": 5,
+      "source": "claude",
+      "title": "old conversation",
+      "updated_at": "2026-06-01T08:00:00+00:00",
+      "message_count": 30
+    },
+    {
+      "id": 6,
+      "source": "codex_cli",
+      "title": "",
+      "updated_at": "2026-07-01T07:00:00+00:00",
+      "message_count": 8
+    },
+    {
+      "id": 7,
+      "source": "claude",
+      "title": "# evil [title] with `code` and | pipe",
+      "updated_at": "2026-07-02T01:00:00Z",
+      "message_count": 5
+    }
+  ]
+}
