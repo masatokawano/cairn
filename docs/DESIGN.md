@@ -17,7 +17,7 @@
 5. `conversations` / `messages` など既存の原本系テーブルは**破壊的変更禁止**。マイグレーションは追加のみ・実行前に DB バックアップを取る。
 6. 旧 ROADMAP.md（Phase 3〜6）は本文書により**廃止**。M0 で ROADMAP.md を書き換える。
 7. 迷ったら本文書の §1 成功基準に照らして判断する。成功基準に寄与しない作業はしない。
-8. **文書の優先順位**: 本文書（docs/DESIGN.md）が正。`docs/adr/` は個別決定の記録（ADR-0004 が本文書の採用を記録し、ADR-0003 の architecture 判断を supersede している）。`INTEGRATION-PREP.md` は M0 前の移行準備専用で、M0 着手後は歴史文書。AGENTS.md / CLAUDE.md は本文書の不変条件の要約であり、矛盾したら本文書が正（AGENTS.md と CLAUDE.md は常に同一内容を維持）。
+8. **文書の優先順位**: 本文書（docs/DESIGN.md）が正。`docs/adr/` は個別決定の記録（ADR-0004 が本文書の採用を記録し、ADR-0003 の architecture 判断を supersede している）。`INTEGRATION-PREP.md` は M0 前の移行準備専用で、M0 着手後は歴史文書。AGENTS.md は本文書の不変条件の要約であり、矛盾したら本文書が正（CLAUDE.md は AGENTS.md を import する 1 行スタブ。マルチモデル運用の詳細は docs/orchestration.md）。
 
 ---
 
