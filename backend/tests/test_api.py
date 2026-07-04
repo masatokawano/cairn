@@ -196,3 +196,23 @@ def test_stats_includes_items_breakdown(client):
     assert "items" in body and "item_links" in body
     kinds = {row["kind"] for row in body["items"]}
     assert "conversation" in kinds  # the uploaded fixture registered items
+
+
+# --- /api/search kinds filter (M2) ----------------------------------------------
+
+def test_search_kinds_param_validates(client):
+    _upload(client, chatgpt_fixture())
+    r = client.get("/api/search", params={"q": "hello", "kinds": "conversation,bookmark"})
+    assert r.status_code == 200
+    r = client.get("/api/search", params={"q": "hello", "kinds": "conversation,bogus"})
+    assert r.status_code == 422
+    assert "bogus" in r.text
+
+
+def test_search_results_carry_m2_fields(client):
+    _upload(client, chatgpt_fixture())
+    r = client.get("/api/search", params={"q": "hello"})
+    assert r.status_code == 200
+    for row in r.json()["results"]:
+        assert row["kind"] == "conversation"
+        assert "item_id" in row and "url" in row

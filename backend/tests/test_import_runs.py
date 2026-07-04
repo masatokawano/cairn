@@ -8,6 +8,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.schema_shapes import downgrade_chunks_pre_v11
+
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 
@@ -119,12 +121,8 @@ def test_migration_creates_import_runs_on_pre_v2_db(client, tmp_path):
     # artefacts too so migration 11's non-idempotent ALTER TABLE does not
     # collide with the pre-existing item_id column on the fresh build.
     conn = db.connect()
+    downgrade_chunks_pre_v11(conn)
     with conn:
-        conn.execute("DROP INDEX IF EXISTS idx_chunks_item")
-        conn.execute("ALTER TABLE chunks DROP COLUMN item_id")
-        conn.execute("DROP TABLE IF EXISTS item_links")
-        conn.execute("DROP TABLE IF EXISTS items")
-        conn.execute("DROP TABLE IF EXISTS sync_state")
         conn.execute("DROP TABLE import_runs")
         conn.execute("ALTER TABLE messages DROP COLUMN source_message_id")
         conn.execute("PRAGMA user_version = 1")

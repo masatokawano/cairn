@@ -162,20 +162,41 @@ def sync_now():
     return stats
 
 
+# items.kind values for /api/search filtering. Named distinctly from the
+# Phase-3 _VALID_KINDS below (assertion kinds) — module-level rebinding
+# would otherwise silently swap the sets.
+_SEARCH_KINDS = {"conversation", "bookmark", "reference", "note"}
+
+
 @app.get("/api/search")
 def search(
     q: str = Query(..., min_length=1),
     source: str | None = None,
+    kinds: str | None = Query(
+        None,
+        description="comma-separated items.kind filter, e.g. 'conversation,bookmark'",
+    ),
     limit: int = Query(50, le=200),
     offset: int = 0,
     mode: str = Query("keyword", pattern="^(keyword|semantic|hybrid)$"),
     after: str | None = None,
     before: str | None = None,
 ):
+    kind_list: list[str] | None = None
+    if kinds:
+        kind_list = [k.strip() for k in kinds.split(",") if k.strip()]
+        bad = sorted(set(kind_list) - _SEARCH_KINDS)
+        if bad:
+            # explicit 422 rather than a silent empty result, mirroring the
+            # mode pattern check — typos should fail loud
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown kinds {bad}; valid: {sorted(_SEARCH_KINDS)}",
+            )
     try:
         results = db.search(
-            q, mode=mode, source=source, limit=limit, offset=offset,
-            after=after, before=before,
+            q, mode=mode, source=source, kinds=kind_list, limit=limit,
+            offset=offset, after=after, before=before,
         )
     except RuntimeError as exc:
         # The only RuntimeError db.search raises today is the "no embeddings

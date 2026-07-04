@@ -178,19 +178,47 @@ CREATE TABLE IF NOT EXISTS sync_state (
 -- conversation_id via items(source, external_id).
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY,
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    -- v12: message_id / conversation_id are NULL for external-item chunks
+    -- (kind='item_text'); the CHECK keeps every chunk anchored to either a
+    -- message (conversation path) or an item (external path).
+    message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
     idx INTEGER NOT NULL,
     start_offset INTEGER NOT NULL,
     end_offset INTEGER NOT NULL,
     text TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'message_text',  -- "message_text" | "attachment_text"
+    kind TEXT NOT NULL DEFAULT 'message_text',  -- "message_text" | "attachment_text" | "item_text"
     chunking_version TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    item_id INTEGER REFERENCES items(id)  -- v11; NULL until backfill / next upsert
+    item_id INTEGER REFERENCES items(id),  -- v11; cross-source join key
+    CHECK ((message_id IS NOT NULL AND conversation_id IS NOT NULL) OR item_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_msg ON chunks(message_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
+
+-- FTS over external-item chunks only (v12, M2). Standalone (not external
+-- content) on purpose: the index is PARTIAL (kind='item_text' rows only), and
+-- an external-content 'rebuild' command would re-index the whole chunks table
+-- including message chunks, duplicating messages_fts hits. Standalone FTS
+-- supports plain DELETE, so partial rebuilds stay correct; the duplicated
+-- text is small (bookmark/reference excerpts, not conversation bodies).
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    text,
+    tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks
+WHEN new.kind = 'item_text' BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks
+WHEN old.kind = 'item_text' BEGIN
+    DELETE FROM chunks_fts WHERE rowid = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE OF text ON chunks
+WHEN old.kind = 'item_text' BEGIN
+    DELETE FROM chunks_fts WHERE rowid = old.id;
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
 CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
 CREATE INDEX IF NOT EXISTS idx_chunks_item ON chunks(item_id);
 
@@ -566,7 +594,67 @@ WHERE item_id IS NULL;
 COMMIT;
 """
 
-_SCHEMA_VERSION = 11
+# Migration 12 (DESIGN.md §7 M2): rebuild chunks so external items can be
+# chunked — message_id / conversation_id become nullable with a CHECK anchor
+# (message or item), and chunks_fts (partial FTS over kind='item_text') is
+# added. chunks is DERIVED data (rebuildable via rechunk), so a table rebuild
+# does not touch invariant 3's originals; ids are copied verbatim so
+# embeddings.chunk_id and the vec0 mirror stay valid. foreign_keys must be OFF
+# around the DROP/RENAME: embeddings has ON DELETE CASCADE on chunk_id, and
+# dropping the old table with FK enforcement on would cascade-delete every
+# embedding. executescript commits any open transaction first, so the PRAGMA
+# lands outside BEGIN as required.
+_MIGRATION_12_ITEM_CHUNKS = """
+PRAGMA foreign_keys=OFF;
+BEGIN;
+CREATE TABLE chunks_v12 (
+    id INTEGER PRIMARY KEY,
+    message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL,
+    end_offset INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'message_text',
+    chunking_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    item_id INTEGER REFERENCES items(id),
+    CHECK ((message_id IS NOT NULL AND conversation_id IS NOT NULL) OR item_id IS NOT NULL)
+);
+INSERT INTO chunks_v12
+    SELECT id, message_id, conversation_id, idx, start_offset, end_offset,
+           text, kind, chunking_version, created_at, item_id
+    FROM chunks;
+DROP TABLE chunks;
+ALTER TABLE chunks_v12 RENAME TO chunks;
+CREATE INDEX IF NOT EXISTS idx_chunks_msg ON chunks(message_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(chunking_version);
+CREATE INDEX IF NOT EXISTS idx_chunks_item ON chunks(item_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    text,
+    tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks
+WHEN new.kind = 'item_text' BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks
+WHEN old.kind = 'item_text' BEGIN
+    DELETE FROM chunks_fts WHERE rowid = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE OF text ON chunks
+WHEN old.kind = 'item_text' BEGIN
+    DELETE FROM chunks_fts WHERE rowid = old.id;
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+INSERT INTO chunks_fts(rowid, text)
+    SELECT id, text FROM chunks WHERE kind = 'item_text';
+COMMIT;
+PRAGMA foreign_keys=ON;
+"""
+
+_SCHEMA_VERSION = 12
 _MIGRATIONS: list[tuple[int, str]] = [
     (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
     (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
@@ -578,6 +666,7 @@ _MIGRATIONS: list[tuple[int, str]] = [
     (9, _MIGRATION_9_SEGMENTS),          # add segments table to pre-v9 DBs (P3-C)
     (10, _MIGRATION_10_ASSERTIONS),      # add assertions table to pre-v10 DBs (P3-D)
     (11, _MIGRATION_11_ITEMS),           # add items/item_links/sync_state + chunks.item_id (M0, DESIGN.md §4)
+    (12, _MIGRATION_12_ITEM_CHUNKS),     # rebuild chunks for external items + chunks_fts (M2, DESIGN.md §7)
 ]
 
 
@@ -1177,6 +1266,94 @@ def rechunk_messages(
     return stats
 
 
+def _item_index_text(title: str | None, meta: dict) -> str:
+    """Assemble the indexable text of an external item (M2, DESIGN.md §4).
+
+    Title plus the text-bearing meta fields the connectors store (karakeep:
+    description/note/summary/text + tags; zotero: abstract/creators/
+    publication + tags). Field order is fixed so the output — and therefore
+    chunk offsets — is deterministic across resyncs. Values are already
+    redacted (upsert_items choke point)."""
+    parts: list[str] = []
+    if title:
+        parts.append(title)
+    for key in ("description", "note", "summary", "text", "abstract", "publication"):
+        val = meta.get(key)
+        if isinstance(val, str) and val.strip():
+            parts.append(val)
+    for key in ("creators", "tags"):
+        val = meta.get(key)
+        if isinstance(val, list) and val:
+            parts.append(", ".join(str(v) for v in val))
+    return "\n".join(parts)
+
+
+def rechunk_items(
+    item_ids: list[int] | None = None,
+    *,
+    chunking_version: str | None = None,
+    force: bool = False,
+) -> dict:
+    """(Re)generate kind='item_text' chunks for non-conversation items (M2).
+
+    Mirrors rechunk_messages: skip items already chunked at this version
+    unless force=True (connector syncs pass force=True for changed items so
+    edited bookmarks re-chunk). Conversation items are excluded — their text
+    is indexed through message chunks. chunks_fts stays in sync via triggers.
+
+    Returns {items, chunks, skipped, chunk_ids} — chunk_ids of the freshly
+    written chunks, so callers (connector sync) can embed exactly the new
+    rows instead of sweeping the whole table.
+    """
+    chunking_version = chunking_version or CURRENT_CHUNKING_VERSION
+    conn = connect()
+    stats: dict = {"items": 0, "chunks": 0, "skipped": 0, "chunk_ids": []}
+    with conn:
+        if item_ids is None:
+            rows = conn.execute(
+                "SELECT id, title, meta FROM items WHERE kind != 'conversation' ORDER BY id"
+            ).fetchall()
+        else:
+            rows = [
+                conn.execute(
+                    "SELECT id, title, meta FROM items WHERE id=? AND kind != 'conversation'",
+                    (iid,),
+                ).fetchone()
+                for iid in item_ids
+            ]
+            rows = [r for r in rows if r is not None]
+        now = utcnow_iso()
+        for row in rows:
+            has = conn.execute(
+                "SELECT COUNT(*) FROM chunks WHERE item_id=? AND kind='item_text'"
+                " AND chunking_version=?",
+                (row["id"], chunking_version),
+            ).fetchone()[0]
+            if has and not force:
+                stats["skipped"] += 1
+                continue
+            if has:
+                conn.execute(
+                    "DELETE FROM chunks WHERE item_id=? AND kind='item_text'"
+                    " AND chunking_version=?",
+                    (row["id"], chunking_version),
+                )
+            text = _item_index_text(row["title"], json.loads(row["meta"] or "{}"))
+            stats["items"] += 1
+            for c in chunk_text(text):
+                cur = conn.execute(
+                    "INSERT INTO chunks"
+                    " (message_id, conversation_id, idx, start_offset, end_offset,"
+                    "  text, kind, chunking_version, created_at, item_id)"
+                    " VALUES (NULL, NULL, ?, ?, ?, ?, 'item_text', ?, ?, ?)",
+                    (c.idx, c.start_offset, c.end_offset, c.text,
+                     chunking_version, now, row["id"]),
+                )
+                stats["chunks"] += 1
+                stats["chunk_ids"].append(cur.lastrowid)
+    return stats
+
+
 def vector_index() -> VectorIndex:
     """Return the active VectorIndex implementation for this connection.
 
@@ -1271,15 +1448,19 @@ def find_similar_chunks(
     model: str,
     k: int = 10,
     source: str | None = None,
+    kinds: list[str] | None = None,
     after: str | None = None,
     before: str | None = None,
 ) -> list[dict]:
     """Top-k chunks by cosine similarity for one (provider, model).
 
     Two-stage pipeline: filter candidates via SQL (provider/model + optional
-    source/date), then delegate KNN to the active VectorIndex (sqlite-vec
-    when available, NumpyIndex otherwise). The filter step keeps the search
-    cheap even on archives with hundreds of thousands of embeddings.
+    source/kind/date), then delegate KNN to the active VectorIndex
+    (sqlite-vec when available, NumpyIndex otherwise). Since M2 the filter
+    joins `items` — the cross-source pivot — so external-item chunks and
+    conversation chunks compete in one candidate pool. items.updated_at
+    mirrors conversations.updated_at for conversation items, so date filters
+    behave as before.
     """
     conn = connect()
     # Stage 1: candidate chunk_ids for this (provider, model) + filters.
@@ -1290,16 +1471,18 @@ def find_similar_chunks(
     sql = (
         "SELECT e.chunk_id FROM embeddings e "
         "JOIN chunks ch ON ch.id = e.chunk_id "
-        "JOIN conversations c ON c.id = ch.conversation_id "
+        "JOIN items i ON i.id = ch.item_id "
         "WHERE e.provider=? AND e.model=? AND e.dimension=?"
     )
     params: list = [provider, model, query_dim]
     if source:
-        sql += " AND c.source=?"; params.append(source)
+        sql += " AND i.source=?"; params.append(source)
+    if kinds:
+        sql += f" AND i.kind IN ({','.join('?' * len(kinds))})"; params.extend(kinds)
     if after:
-        sql += " AND c.updated_at >= ?"; params.append(after)
+        sql += " AND i.updated_at >= ?"; params.append(after)
     if before:
-        sql += " AND c.updated_at <= ?"; params.append(before)
+        sql += " AND i.updated_at <= ?"; params.append(before)
     candidates = [r[0] for r in conn.execute(sql, params).fetchall()]
     if not candidates:
         return []
@@ -1314,13 +1497,14 @@ def find_similar_chunks(
     if not pairs:
         return []
 
-    # Stage 3: hydrate top-k with chunk text and conversation metadata.
+    # Stage 3: hydrate top-k with chunk text and item metadata.
     chunk_ids = [c for c, _ in pairs]
     placeholders = ",".join("?" * len(chunk_ids))
     rows = conn.execute(
         f"SELECT ch.id, ch.message_id, ch.conversation_id, ch.text, "
-        f"       c.source, c.updated_at "
-        f"FROM chunks ch JOIN conversations c ON c.id = ch.conversation_id "
+        f"       i.id AS item_id, i.kind, i.source, i.title, i.url, "
+        f"       i.external_id, i.updated_at "
+        f"FROM chunks ch JOIN items i ON i.id = ch.item_id "
         f"WHERE ch.id IN ({placeholders})",
         chunk_ids,
     ).fetchall()
@@ -1330,6 +1514,11 @@ def find_similar_chunks(
             "chunk_id": cid,
             "message_id": by_id[cid]["message_id"],
             "conversation_id": by_id[cid]["conversation_id"],
+            "item_id": by_id[cid]["item_id"],
+            "kind": by_id[cid]["kind"],
+            "title": by_id[cid]["title"],
+            "url": by_id[cid]["url"],
+            "external_id": by_id[cid]["external_id"],
             "score": score,
             "text": by_id[cid]["text"],
             "source": by_id[cid]["source"],
@@ -1736,43 +1925,49 @@ def search(
     mode: str = "keyword",
     provider: EmbeddingProvider | None = None,
     source: str | None = None,
+    kinds: list[str] | None = None,
     limit: int = 50,
     offset: int = 0,
     after: str | None = None,
     before: str | None = None,
 ) -> list[dict]:
-    """Search messages; group hits by conversation (best hit per conversation).
+    """Cross-source search; one row per item (best hit per item).
+
+    Since M2 the result space is the items registry: conversations (via
+    messages_fts) and external items — bookmarks, references, notes — (via
+    chunks_fts) compete in one ranked list. `kinds` narrows by items.kind;
+    None means everything. Archives without external items get byte-identical
+    results to the pre-M2 conversation-only behaviour.
 
     Modes (kw-only):
       "keyword"  — FTS5 trigram (or LIKE fallback for <3-char terms). Free.
+                   Conversation and item hit lists are fused with RRF when
+                   both are non-empty (bm25 scores from two FTS tables are
+                   not directly comparable; ranks are).
       "semantic" — embed q, KNN against `embeddings` for the active (provider,
-                   model), aggregate to best chunk per conversation.
-      "hybrid"   — both, fused with Reciprocal Rank Fusion (RRF, k₀=60). The
-                   merge is rank-based, so scale mismatches between BM25 and
-                   cosine don't bias the result; conversations that surface in
-                   *both* lists naturally rank highest.
+                   model), aggregate to best chunk per item.
+      "hybrid"   — keyword + semantic, fused with RRF (k₀=60), keyed by item.
 
     Default is "keyword" to keep existing callers byte-compatible and to avoid
     silently loading an embedding model on every legacy /api/search call.
     UIs that want semantic by default should pass mode="hybrid" explicitly.
 
-    Each result gains three fields over Phase 1:
-      match_reason     — "keyword" | "semantic" | "both"
-      matched_keywords — list[str] extracted from [[…]] highlights in the snippet
-      semantic_score   — float in (-1,1) when the semantic path fired, else None
+    Result fields added in M2: kind, item_id, url, external_id
+    (conversation rows keep conversation_id / role / message_id; external
+    rows carry None there).
     """
     if mode == "keyword":
-        return _search_keyword(q, source=source, limit=limit, offset=offset,
-                               after=after, before=before)
+        return _search_keyword(q, source=source, kinds=kinds, limit=limit,
+                               offset=offset, after=after, before=before)
     if mode in ("semantic", "hybrid"):
         if provider is None:
             provider = _active_embedding_provider()
         if mode == "semantic":
             return _search_semantic(q, provider=provider, source=source,
-                                    limit=limit, offset=offset,
+                                    kinds=kinds, limit=limit, offset=offset,
                                     after=after, before=before)
         return _search_hybrid(q, provider=provider, source=source,
-                              limit=limit, offset=offset,
+                              kinds=kinds, limit=limit, offset=offset,
                               after=after, before=before)
     raise ValueError(f"unknown search mode: {mode!r}")
 
@@ -1781,19 +1976,80 @@ def _search_keyword(
     q: str,
     *,
     source: str | None,
+    kinds: list[str] | None = None,
     limit: int,
     offset: int,
     after: str | None,
     before: str | None,
 ) -> list[dict]:
-    """Keyword path (Phase 1 logic preserved). Results get
+    """Keyword path. Conversation hits (messages_fts, Phase-1 logic
+    preserved) and external-item hits (chunks_fts, M2) are computed as two
+    ranked lists. When only one list has hits the legacy SQL paging applies
+    (conversation-only archives stay byte-compatible); when both do, the
+    lists are RRF-fused and paged in Python. Results get
     match_reason="keyword" and matched_keywords parsed from the snippet."""
-    conn = connect()
     terms = [t for t in q.split() if t]
     if not terms:
         return []
     use_fts = all(len(t) >= 3 for t in terms)
 
+    want_conv = kinds is None or "conversation" in kinds
+    ext_kinds = None if kinds is None else [k for k in kinds if k != "conversation"]
+    want_items = kinds is None or bool(ext_kinds)
+
+    item_rows = (
+        _keyword_item_rows(q, terms, use_fts, source=source, kinds=ext_kinds,
+                           after=after, before=before, fetch=limit + offset)
+        if want_items else []
+    )
+    if not want_conv:
+        return item_rows[offset:offset + limit]
+    if not item_rows:
+        # conversation-only outcome: keep the pre-M2 SQL paging path verbatim
+        return _keyword_conv_rows(q, terms, use_fts, source=source,
+                                  after=after, before=before,
+                                  limit=limit, offset=offset)
+    conv_rows = _keyword_conv_rows(q, terms, use_fts, source=source,
+                                   after=after, before=before,
+                                   limit=limit + offset, offset=0)
+    if use_fts:
+        merged = _rrf_merge([conv_rows, item_rows], key=lambda r: r["item_id"])
+    else:
+        # LIKE fallback has no rank; both lists are recency-ordered already
+        merged = sorted(conv_rows + item_rows,
+                        key=lambda r: r["updated_at"] or "", reverse=True)
+    return merged[offset:offset + limit]
+
+
+def _rrf_merge(lists: list[list[dict]], *, key) -> list[dict]:
+    """Fuse pre-ranked result lists with Reciprocal Rank Fusion. When the
+    same key appears in several lists the first list's row wins (callers
+    order lists by row preference)."""
+    scores: dict = {}
+    rows: dict = {}
+    for lst in lists:
+        for pos, row in enumerate(lst):
+            k = key(row)
+            scores[k] = scores.get(k, 0.0) + 1.0 / (_RRF_K + pos + 1)
+            rows.setdefault(k, row)
+    return [rows[k] for k in sorted(scores, key=lambda k: scores[k], reverse=True)]
+
+
+def _keyword_conv_rows(
+    q: str,
+    terms: list[str],
+    use_fts: bool,
+    *,
+    source: str | None,
+    after: str | None,
+    before: str | None,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Conversation-side keyword hits (messages_fts / LIKE), one row per
+    conversation. items is joined only to attach the cross-source keys the
+    M2 result shape carries (item_id / kind)."""
+    conn = connect()
     src_clause = ""
     src_param: list[str] = []
     if source:
@@ -1814,6 +2070,7 @@ def _search_keyword(
             f"""
             SELECT * FROM (
                 SELECT c.id AS conversation_id, c.source, c.title, c.created_at, c.updated_at, c.meta,
+                       c.source_id AS external_id, i.id AS item_id,
                        m.id AS message_id, m.role, m.created_at AS msg_created_at,
                        hits.snip,
                        COUNT(*) OVER (PARTITION BY c.id) AS hit_count,
@@ -1828,6 +2085,7 @@ def _search_keyword(
                 ) AS hits
                 JOIN messages m ON m.id = hits.rowid
                 JOIN conversations c ON c.id = m.conversation_id
+                LEFT JOIN items i ON i.source = c.source AND i.external_id = c.source_id
                 WHERE 1=1 {src_clause}
             )
             WHERE rn = 1
@@ -1846,12 +2104,14 @@ def _search_keyword(
             f"""
             SELECT * FROM (
                 SELECT c.id AS conversation_id, c.source, c.title, c.created_at, c.updated_at, c.meta,
+                       c.source_id AS external_id, i.id AS item_id,
                        m.id AS message_id, m.role, m.created_at AS msg_created_at,
                        m.text AS snip,
                        COUNT(*) OVER (PARTITION BY c.id) AS hit_count,
                        ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY m.idx) AS rn
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
+                LEFT JOIN items i ON i.source = c.source AND i.external_id = c.source_id
                 WHERE {like_clauses} {src_clause}
             )
             WHERE rn = 1
@@ -1870,13 +2130,127 @@ def _search_keyword(
                 snip = re.sub(re.escape(t), lambda m: f"[[{m.group(0)}]]", snip, flags=re.IGNORECASE)
         results.append({
             "conversation_id": r["conversation_id"],
+            "item_id": r["item_id"],
+            "kind": "conversation",
             "source": r["source"],
             "title": r["title"],
+            "url": None,
+            "external_id": r["external_id"],
             "updated_at": r["updated_at"] or r["created_at"],
             "meta": json.loads(r["meta"]),
             "snippet": snip,
             "role": r["role"],
             "message_id": r["message_id"],
+            "hit_count": r["hit_count"],
+            "match_reason": "keyword",
+            "matched_keywords": _extract_highlighted(snip),
+            "semantic_score": None,
+        })
+    return results
+
+
+def _keyword_item_rows(
+    q: str,
+    terms: list[str],
+    use_fts: bool,
+    *,
+    source: str | None,
+    kinds: list[str] | None,
+    after: str | None,
+    before: str | None,
+    fetch: int,
+) -> list[dict]:
+    """External-item keyword hits (chunks_fts / LIKE over item_text chunks),
+    one row per item, shaped like conversation results (conversation-only
+    fields carry None)."""
+    conn = connect()
+    filt = ""
+    params: list = []
+    if source:
+        filt += " AND i.source = ? "
+        params.append(source)
+    if kinds:
+        filt += f" AND i.kind IN ({','.join('?' * len(kinds))}) "
+        params.extend(kinds)
+    if after:
+        filt += " AND i.updated_at >= ? "
+        params.append(after)
+    if before:
+        filt += " AND i.updated_at <= ? "
+        params.append(before)
+
+    if use_fts:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM (
+                SELECT i.id AS item_id, i.kind, i.source, i.title, i.url,
+                       i.external_id, i.created_at, i.updated_at, i.meta,
+                       hits.snip,
+                       COUNT(*) OVER (PARTITION BY i.id) AS hit_count,
+                       ROW_NUMBER() OVER (PARTITION BY i.id ORDER BY hits.rank) AS rn,
+                       hits.rank AS rank
+                FROM (
+                    SELECT rowid,
+                           snippet(chunks_fts, 0, '[[', ']]', '…', 24) AS snip,
+                           bm25(chunks_fts) AS rank
+                    FROM chunks_fts
+                    WHERE chunks_fts MATCH ?
+                ) AS hits
+                JOIN chunks ch ON ch.id = hits.rowid
+                JOIN items i ON i.id = ch.item_id
+                WHERE 1=1 {filt}
+            )
+            WHERE rn = 1
+            ORDER BY rank
+            LIMIT ?
+            """,
+            [_fts_query(q), *params, fetch],
+        ).fetchall()
+    else:
+        like_clauses = " AND ".join(["ch.text LIKE ? ESCAPE '\\'"] * len(terms))
+        like_params = [
+            "%" + t.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_") + "%"
+            for t in terms
+        ]
+        rows = conn.execute(
+            f"""
+            SELECT * FROM (
+                SELECT i.id AS item_id, i.kind, i.source, i.title, i.url,
+                       i.external_id, i.created_at, i.updated_at, i.meta,
+                       ch.text AS snip,
+                       COUNT(*) OVER (PARTITION BY i.id) AS hit_count,
+                       ROW_NUMBER() OVER (PARTITION BY i.id ORDER BY ch.idx) AS rn
+                FROM chunks ch
+                JOIN items i ON i.id = ch.item_id
+                WHERE ch.kind = 'item_text' AND {like_clauses} {filt}
+            )
+            WHERE rn = 1
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            [*like_params, *params, fetch],
+        ).fetchall()
+
+    results = []
+    for r in rows:
+        snip = r["snip"]
+        if not use_fts:
+            snip = _make_snippet(snip, terms[0])
+            for t in terms:
+                snip = re.sub(re.escape(t), lambda m: f"[[{m.group(0)}]]", snip, flags=re.IGNORECASE)
+        results.append({
+            "conversation_id": None,
+            "item_id": r["item_id"],
+            "kind": r["kind"],
+            "source": r["source"],
+            "title": r["title"],
+            "url": r["url"],
+            "external_id": r["external_id"],
+            "updated_at": r["updated_at"] or r["created_at"],
+            "meta": json.loads(r["meta"] or "{}"),
+            "snippet": snip,
+            "role": None,
+            "message_id": None,
             "hit_count": r["hit_count"],
             "match_reason": "keyword",
             "matched_keywords": _extract_highlighted(snip),
@@ -1951,14 +2325,16 @@ def _search_semantic(
     *,
     provider: EmbeddingProvider,
     source: str | None,
+    kinds: list[str] | None = None,
     limit: int,
     offset: int,
     after: str | None,
     before: str | None,
 ) -> list[dict]:
-    """Semantic path: embed → KNN → aggregate to best chunk per conversation.
+    """Semantic path: embed → KNN → aggregate to best chunk per item (M2:
+    conversations and external items compete in one pool).
 
-    Over-fetches KNN candidates (limit*3 + offset + 50) so the per-conversation
+    Over-fetches KNN candidates (limit*3 + offset + 50) so the per-item
     deduplication still leaves enough hits to fill the requested page."""
     if not q.strip():
         return []
@@ -1967,20 +2343,20 @@ def _search_semantic(
     hits = find_similar_chunks(
         query_vector,
         provider=provider.name, model=provider.model, k=k,
-        source=source, after=after, before=before,
+        source=source, kinds=kinds, after=after, before=before,
     )
     if not hits:
         return []
-    # One row per conversation: best chunk wins; hit_count counts the chunks
-    # that matched (so the UI can show "matched in N chunks").
-    by_conv: dict[int, dict] = {}
+    # One row per item: best chunk wins; hit_count counts the chunks that
+    # matched (so the UI can show "matched in N chunks").
+    by_item: dict[int, dict] = {}
     counts: dict[int, int] = {}
     for h in hits:
-        cid = h["conversation_id"]
-        counts[cid] = counts.get(cid, 0) + 1
-        if cid not in by_conv or h["score"] > by_conv[cid]["score"]:
-            by_conv[cid] = h
-    ranked = sorted(by_conv.values(), key=lambda x: x["score"], reverse=True)
+        iid = h["item_id"]
+        counts[iid] = counts.get(iid, 0) + 1
+        if iid not in by_item or h["score"] > by_item[iid]["score"]:
+            by_item[iid] = h
+    ranked = sorted(by_item.values(), key=lambda x: x["score"], reverse=True)
     page = ranked[offset:offset + limit]
     if not page:
         return []
@@ -1988,44 +2364,71 @@ def _search_semantic(
 
 
 def _hydrate_semantic(hits: list[dict], counts: dict[int, int]) -> list[dict]:
-    """Add title/meta/role to KNN hits and shape them like keyword results."""
+    """Add title/meta/role to KNN hits and shape them like keyword results.
+
+    Conversation hits are hydrated from conversations/messages (items.meta
+    mirrors conversations.meta but redact-apply can drift it — the original
+    tables are authoritative). External hits hydrate from items."""
     conn = connect()
-    cids = list({h["conversation_id"] for h in hits})
-    mids = list({h["message_id"] for h in hits})
-    ph_c = ",".join("?" * len(cids))
-    ph_m = ",".join("?" * len(mids))
+    conv_hits = [h for h in hits if h["kind"] == "conversation"]
+    cids = list({h["conversation_id"] for h in conv_hits})
+    mids = list({h["message_id"] for h in conv_hits})
     conv = {r["id"]: r for r in conn.execute(
-        f"SELECT id, title, meta, created_at FROM conversations WHERE id IN ({ph_c})",
-        cids,
-    ).fetchall()}
+        f"SELECT id, title, meta, created_at FROM conversations"
+        f" WHERE id IN ({','.join('?' * len(cids))})", cids,
+    ).fetchall()} if cids else {}
     msg = {r["id"]: r for r in conn.execute(
-        f"SELECT id, role FROM messages WHERE id IN ({ph_m})", mids,
+        f"SELECT id, role FROM messages WHERE id IN ({','.join('?' * len(mids))})",
+        mids,
+    ).fetchall()} if mids else {}
+    item_meta = {r["id"]: r for r in conn.execute(
+        f"SELECT id, meta, created_at FROM items"
+        f" WHERE id IN ({','.join('?' * len(hits))})",
+        [h["item_id"] for h in hits],
     ).fetchall()}
     out: list[dict] = []
     for h in hits:
-        cm = conv.get(h["conversation_id"])
-        mm = msg.get(h["message_id"])
-        if not cm or not mm:
-            # CASCADE deleted between the KNN call and hydration; skip rather
-            # than fabricating a result with missing fields.
-            continue
         snip = h["text"]
         if len(snip) > 200:
             snip = snip[:200] + "…"
-        out.append({
+        base = {
             "conversation_id": h["conversation_id"],
+            "item_id": h["item_id"],
+            "kind": h["kind"],
             "source": h["source"],
-            "title": cm["title"],
-            "updated_at": h["updated_at"] or cm["created_at"],
-            "meta": json.loads(cm["meta"]),
+            "url": h["url"],
+            "external_id": h["external_id"],
             "snippet": snip,
-            "role": mm["role"],
             "message_id": h["message_id"],
-            "hit_count": counts.get(h["conversation_id"], 1),
+            "hit_count": counts.get(h["item_id"], 1),
             "match_reason": "semantic",
             "matched_keywords": [],
             "semantic_score": h["score"],
-        })
+        }
+        if h["kind"] == "conversation":
+            cm = conv.get(h["conversation_id"])
+            mm = msg.get(h["message_id"])
+            if not cm or not mm:
+                # CASCADE deleted between the KNN call and hydration; skip
+                # rather than fabricating a result with missing fields.
+                continue
+            base.update({
+                "title": cm["title"],
+                "updated_at": h["updated_at"] or cm["created_at"],
+                "meta": json.loads(cm["meta"]),
+                "role": mm["role"],
+            })
+        else:
+            im = item_meta.get(h["item_id"])
+            if im is None:
+                continue
+            base.update({
+                "title": h["title"],
+                "updated_at": h["updated_at"] or im["created_at"],
+                "meta": json.loads(im["meta"] or "{}"),
+                "role": None,
+            })
+        out.append(base)
     return out
 
 
@@ -2034,46 +2437,48 @@ def _search_hybrid(
     *,
     provider: EmbeddingProvider,
     source: str | None,
+    kinds: list[str] | None = None,
     limit: int,
     offset: int,
     after: str | None,
     before: str | None,
 ) -> list[dict]:
-    """Hybrid path: RRF-fuse keyword and semantic rank lists.
+    """Hybrid path: RRF-fuse keyword and semantic rank lists, keyed by item
+    (M2: conversations and external items are one result space).
 
     Pages internally with a generous limit (limit*5, min 100) so the top of
     the merged list is stable even when keyword and semantic agree on few
-    conversations. Pagination applies AFTER merging."""
+    items. Pagination applies AFTER merging."""
     internal = max(limit * 5, 100)
-    kw = _search_keyword(q, source=source, limit=internal, offset=0,
-                         after=after, before=before)
-    sem = _search_semantic(q, provider=provider, source=source,
+    kw = _search_keyword(q, source=source, kinds=kinds, limit=internal,
+                         offset=0, after=after, before=before)
+    sem = _search_semantic(q, provider=provider, source=source, kinds=kinds,
                            limit=internal, offset=0,
                            after=after, before=before)
-    kw_rank = {r["conversation_id"]: i for i, r in enumerate(kw)}
-    sem_rank = {r["conversation_id"]: i for i, r in enumerate(sem)}
-    by_kw = {r["conversation_id"]: r for r in kw}
-    by_sem = {r["conversation_id"]: r for r in sem}
-    all_cids = set(kw_rank) | set(sem_rank)
-    if not all_cids:
+    kw_rank = {r["item_id"]: i for i, r in enumerate(kw)}
+    sem_rank = {r["item_id"]: i for i, r in enumerate(sem)}
+    by_kw = {r["item_id"]: r for r in kw}
+    by_sem = {r["item_id"]: r for r in sem}
+    all_ids = set(kw_rank) | set(sem_rank)
+    if not all_ids:
         return []
     rrf: dict[int, float] = {}
-    for cid in all_cids:
+    for iid in all_ids:
         s = 0.0
-        if cid in kw_rank:
-            s += 1.0 / (_RRF_K + kw_rank[cid] + 1)
-        if cid in sem_rank:
-            s += 1.0 / (_RRF_K + sem_rank[cid] + 1)
-        rrf[cid] = s
-    ranked = sorted(all_cids, key=lambda c: rrf[c], reverse=True)
+        if iid in kw_rank:
+            s += 1.0 / (_RRF_K + kw_rank[iid] + 1)
+        if iid in sem_rank:
+            s += 1.0 / (_RRF_K + sem_rank[iid] + 1)
+        rrf[iid] = s
+    ranked = sorted(all_ids, key=lambda i: rrf[i], reverse=True)
     page = ranked[offset:offset + limit]
     out: list[dict] = []
-    for cid in page:
+    for iid in page:
         # Prefer the keyword row when present: its FTS snippet has [[…]]
         # highlights the UI needs; the semantic row's snippet is just the
         # chunk text. Pull semantic_score off the semantic row when there.
-        kr = by_kw.get(cid)
-        sr = by_sem.get(cid)
+        kr = by_kw.get(iid)
+        sr = by_sem.get(iid)
         base = dict(kr) if kr else dict(sr)
         if kr and sr:
             base["match_reason"] = "both"

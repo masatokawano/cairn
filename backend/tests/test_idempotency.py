@@ -8,6 +8,8 @@ import importlib
 
 import pytest
 
+from tests.schema_shapes import downgrade_chunks_pre_v11
+
 
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
@@ -95,12 +97,8 @@ def test_migration_adds_source_message_id_to_pre_v3_db(db):
     # collide with the pre-existing item_id column on the fresh build.
     db.upsert_conversations([make_conv(db)])
     conn = db.connect()
+    downgrade_chunks_pre_v11(conn)
     with conn:
-        conn.execute("DROP INDEX IF EXISTS idx_chunks_item")
-        conn.execute("ALTER TABLE chunks DROP COLUMN item_id")
-        conn.execute("DROP TABLE IF EXISTS item_links")
-        conn.execute("DROP TABLE IF EXISTS items")
-        conn.execute("DROP TABLE IF EXISTS sync_state")
         conn.execute("ALTER TABLE messages DROP COLUMN source_message_id")
         conn.execute("PRAGMA user_version = 2")
     conn.close()

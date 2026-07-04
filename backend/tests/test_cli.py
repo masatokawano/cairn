@@ -42,7 +42,6 @@ def test_help_exits_zero(cli):
     (["sync", "obsidian"], "M3"),
     (["sync", "all"], "M3"),
     (["review", "weekly"], "M4"),
-    (["index", "rebuild"], "M2"),
 ])
 def test_stub_subcommands_exit_one(cli, args, milestone):
     runner = CliRunner()
@@ -100,3 +99,17 @@ def test_sync_conversations_runs_end_to_end(cli):
     assert payload["files_scanned"] == 0
     assert payload["files_imported"] == 0
     assert payload["inserted"] == 0
+
+
+def test_index_rebuild_runs_on_empty_db(cli):
+    """`cairn index rebuild` (M2) succeeds on an empty DB: zero chunks, both
+    FTS rebuilds, embeddings gracefully skipped (no provider), links zero."""
+    import json
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["index", "rebuild"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["chunks_messages"]["chunks"] == 0
+    assert payload["chunks_items"]["chunks"] == 0
+    assert isinstance(payload["embeddings"], str) and "skipped" in payload["embeddings"]
+    assert payload["item_links"]["total"] == 0

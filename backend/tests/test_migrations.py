@@ -204,7 +204,7 @@ def test_migration_v11_backfills_items_and_chunk_item_id(db, tmp_path):
     _seed_v10_shape_db(str(db_path))
 
     db.connect()
-    assert _user_version(db) == 11
+    assert _user_version(db) == db._SCHEMA_VERSION
 
     tables = {r[0] for r in db.connect().execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
@@ -232,7 +232,7 @@ def test_migration_v11_backfills_items_and_chunk_item_id(db, tmp_path):
     ).fetchone()[0]
     assert chunk_item_ids[0] == item_id
 
-    backups = glob.glob(str(tmp_path / "*.premigrate-v10-to-v11-*"))
+    backups = glob.glob(str(tmp_path / "*.premigrate-v10-to-v12-*"))
     assert len(backups) == 1
     assert oct(os.stat(backups[0]).st_mode & 0o777) == "0o600"
 
@@ -243,12 +243,12 @@ def test_migration_v11_reopen_is_noop(db, tmp_path):
     _reset_conn(db)
     _seed_v10_shape_db(str(db_path))
     db.connect()
-    assert _user_version(db) == 11
+    assert _user_version(db) == db._SCHEMA_VERSION
     _reset_conn(db)
 
     db.connect()
-    assert _user_version(db) == 11
-    backups = glob.glob(str(tmp_path / "*.premigrate-v10-to-v11-*"))
+    assert _user_version(db) == db._SCHEMA_VERSION
+    backups = glob.glob(str(tmp_path / "*.premigrate-v10-to-v12-*"))
     assert len(backups) == 1  # still just the one from the initial migration
 
 

@@ -108,17 +108,43 @@ def review_weekly(
 
 @index_app.command("rebuild")
 def index_rebuild() -> None:
-    """(Stub) Rebuild all derived data — implemented in M2.
+    """Rebuild derived data from the originals (M2, DESIGN.md §5.7).
 
-    Note: embedding regeneration alone is available today via
-    `python -m app.admin reindex`. That path stays for M0.
+    Fills gaps rather than nuking: rechunk skips messages/items already at
+    the current chunking version (so existing embeddings survive — a forced
+    full rechunk would CASCADE-delete every embedding and cost hours of
+    re-embedding), then re-embeds only missing chunks, rebuilds both FTS
+    indexes, the vec0 mirror, and item_links. Embedding is skipped with a
+    note when no provider/model is available.
     """
-    typer.echo(
-        "index rebuild: not implemented yet — landing in M2.\n"
-        "For embedding regeneration alone, use `python -m app.admin reindex`.",
-        err=True,
-    )
-    raise typer.Exit(code=1)
+    from . import db
+
+    item_chunks = db.rechunk_items(force=False)
+    item_chunks.pop("chunk_ids", None)  # internal detail; huge in real runs
+    out: dict = {
+        "chunks_messages": db.rechunk_messages(force=False),
+        "chunks_items": item_chunks,
+    }
+    conn = db.connect()
+    with conn:
+        # messages_fts is external-content: 'rebuild' re-reads from messages.
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        # chunks_fts is standalone AND partial (item_text only) — 'rebuild'
+        # doesn't apply; delete + reinsert the indexed subset instead.
+        conn.execute("DELETE FROM chunks_fts")
+        conn.execute(
+            "INSERT INTO chunks_fts(rowid, text)"
+            " SELECT id, text FROM chunks WHERE kind='item_text'"
+        )
+    try:
+        provider = db._active_embedding_provider()
+        out["embeddings"] = db.embed_chunks(provider, only_missing=True)
+    except Exception as exc:
+        out["embeddings"] = f"skipped: {exc}"
+    idx = db.vector_index()
+    out["vector_index"] = {"backend": idx.name, "vectors": idx.rebuild(conn)}
+    out["item_links"] = db.rebuild_item_links()
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
 
 
 def main() -> None:

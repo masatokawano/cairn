@@ -192,6 +192,26 @@
   CASCADE。upsert_conversations は更新時に messages を全削除→再挿入するため、
   attachments も自動で消えて再投入される（orphan 0 を integrity_check で確認）。
 
+## 横断インデックス（M2 / migration v12）
+
+- **chunks テーブル再構築（v12）は FK まわりに罠が 2 つ**:
+  ① `DROP TABLE chunks` は FK ON だと embeddings（ON DELETE CASCADE）を
+  全滅させる → migration は `PRAGMA foreign_keys=OFF` → BEGIN…COMMIT →
+  `PRAGMA foreign_keys=ON` で挟む（PRAGMA はトランザクション内では**無言で
+  no-op** になるので、必ず外側に置く）。
+  ② `ALTER TABLE chunks RENAME TO x` は**他テーブルの FK 句を x に書き換える**
+  （embeddings の FK が temp 名を指したまま迷子になる）。正しい向きは
+  「新テーブルを別名で作る → コピー → DROP chunks → RENAME 新→chunks」。
+  テストの旧形状シミュレーションも同じ罠を踏むため `tests/schema_shapes.py`
+  の `downgrade_chunks_pre_v11` に集約した（呼び出しはトランザクション外で）。
+- **chunks_fts は standalone FTS（external content にしない）**。索引対象が
+  kind='item_text' の部分集合であり、external content の `('rebuild')` コマンドは
+  content table 全体を再索引して message chunks まで取り込んでしまうため。
+  部分再構築は `DELETE FROM chunks_fts` → 条件付き INSERT SELECT で行う
+  （`cairn index rebuild` 実装参照）。
+- main.py に Phase 3 の `_VALID_KINDS`（assertion 種別）が既にある。items.kind の
+  検証セットは `_SEARCH_KINDS`。同名で足すと後勝ちで静かに壊れる。
+
 ## スキーマ migration（P1-A / `db.py`）
 
 - バージョンは `PRAGMA user_version`。2つの仕組みを併用する:

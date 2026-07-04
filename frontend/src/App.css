@@ -336,6 +336,9 @@ mark {
 .badge-gemini { background: #4285f4; }
 .badge-claude_cli { background: #a05a3f; }
 .badge-codex_cli { background: #444; }
+.badge-karakeep { background: #7c5cbf; }
+.badge-zotero { background: #cc2936; }
+.ext-mark { color: #8899aa; font-size: 0.85em; }
 
 .overlay {
   position: fixed;

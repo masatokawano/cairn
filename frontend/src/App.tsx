@@ -5,13 +5,18 @@ type SearchMode = 'keyword' | 'semantic' | 'hybrid'
 
 type MatchReason = 'keyword' | 'semantic' | 'both'
 
+type ItemKind = 'conversation' | 'bookmark' | 'reference' | 'note'
+
 type SearchHit = {
-  conversation_id: number
+  conversation_id: number | null // null for external items (M2)
+  item_id: number
+  kind: ItemKind
   source: string
   title: string
+  url: string | null
   updated_at: string | null
   snippet: string
-  role: string
+  role: string | null
   hit_count: number
   meta: { cwd?: string }
   match_reason: MatchReason
@@ -41,6 +46,8 @@ type Conversation = {
 }
 
 type SourceStat = { source: string; conversations: number; messages: number }
+
+type ItemStat = { kind: ItemKind; source: string; count: number }
 
 type Assertion = {
   id: number
@@ -92,6 +99,16 @@ const SOURCES: { key: string; label: string }[] = [
   { key: 'gemini', label: 'Gemini' },
   { key: 'claude_cli', label: 'claude CLI' },
   { key: 'codex_cli', label: 'codex CLI' },
+  { key: 'karakeep', label: 'Karakeep' },
+  { key: 'zotero', label: 'Zotero' },
+]
+
+// items.kind filter chips (M2). 'note' arrives with the Obsidian connector
+// (M3) and is omitted until it exists in the registry.
+const KINDS: { key: ItemKind; label: string }[] = [
+  { key: 'conversation', label: '会話' },
+  { key: 'bookmark', label: 'ブックマーク' },
+  { key: 'reference', label: '文献' },
 ]
 
 const sourceLabel = (key: string) => SOURCES.find((s) => s.key === key)?.label ?? key
@@ -161,6 +178,7 @@ const REASON_BADGE: Record<MatchReason, string> = {
 export default function App() {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<string | null>(null)
+  const [kind, setKind] = useState<ItemKind | null>(null)
   const [mode, setMode] = useState<SearchMode>(loadMode)
   // YYYY-MM-DD from <input type="date">; empty string = no filter. The
   // backend compares against ISO8601 updated_at, so a date-only string
@@ -171,6 +189,7 @@ export default function App() {
   const [recent, setRecent] = useState<ConvSummary[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [stats, setStats] = useState<SourceStat[]>([])
+  const [itemStats, setItemStats] = useState<ItemStat[]>([])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -188,8 +207,11 @@ export default function App() {
   const debounce = useRef<number>(0)
 
   const refreshStats = useCallback(() => {
-    api<{ sources: SourceStat[] }>('/api/stats')
-      .then((d) => setStats(d.sources))
+    api<{ sources: SourceStat[]; items?: ItemStat[] }>('/api/stats')
+      .then((d) => {
+        setStats(d.sources)
+        setItemStats(d.items ?? [])
+      })
       .catch((e: Error) => setNotice(e.message))
   }, [])
 
@@ -207,7 +229,7 @@ export default function App() {
   }, [refreshStats, loadRecent])
 
   const runSearch = useCallback(
-    (q: string, src: string | null, m: SearchMode, a: string, b: string) => {
+    (q: string, src: string | null, k: ItemKind | null, m: SearchMode, a: string, b: string) => {
       if (!q.trim()) {
         setHits(null)
         loadRecent(src)
@@ -215,6 +237,7 @@ export default function App() {
       }
       const p = new URLSearchParams({ q, mode: m })
       if (src) p.set('source', src)
+      if (k) p.set('kinds', k)
       if (a) p.set('after', a)
       // `before` from <input type="date"> is the start of that day. Pad to
       // end-of-day so a user picking "2026-06-25" includes everything on
@@ -230,9 +253,9 @@ export default function App() {
   // Debounced live search
   useEffect(() => {
     window.clearTimeout(debounce.current)
-    debounce.current = window.setTimeout(() => runSearch(query, source, mode, after, before), 250)
+    debounce.current = window.setTimeout(() => runSearch(query, source, kind, mode, after, before), 250)
     return () => window.clearTimeout(debounce.current)
-  }, [query, source, mode, after, before, runSearch])
+  }, [query, source, kind, mode, after, before, runSearch])
 
   // Persist mode so a refresh doesn't reset to the default.
   useEffect(() => {
@@ -333,7 +356,7 @@ export default function App() {
     }
     setBusy(false)
     refreshStats()
-    runSearch(query, source, mode, after, before)
+    runSearch(query, source, kind, mode, after, before)
   }
 
   type SyncResult = {
@@ -356,7 +379,7 @@ export default function App() {
     }
     setBusy(false)
     refreshStats()
-    runSearch(query, source, mode, after, before)
+    runSearch(query, source, kind, mode, after, before)
   }
 
   const totalConvs = stats.reduce((a, s) => a + s.conversations, 0)
@@ -436,6 +459,13 @@ export default function App() {
         </button>
         {SOURCES.map((s) => {
           const st = stats.find((x) => x.source === s.key)
+          // external sources (karakeep/zotero) count via the items registry
+          const it = st ? null : itemStats.filter((x) => x.source === s.key)
+          const count = st
+            ? st.conversations
+            : it && it.length
+            ? it.reduce((n, x) => n + x.count, 0)
+            : null
           return (
             <button
               key={s.key}
@@ -443,10 +473,25 @@ export default function App() {
               onClick={() => setSource(source === s.key ? null : s.key)}
             >
               {s.label}
-              {st ? ` (${st.conversations})` : ''}
+              {count !== null ? ` (${count})` : ''}
             </button>
           )
         })}
+      </div>
+
+      <div className="filters">
+        <button className={`chip ${kind === null ? 'active' : ''}`} onClick={() => setKind(null)}>
+          全種類
+        </button>
+        {KINDS.map((k) => (
+          <button
+            key={k.key}
+            className={`chip ${kind === k.key ? 'active' : ''}`}
+            onClick={() => setKind(kind === k.key ? null : k.key)}
+          >
+            {k.label}
+          </button>
+        ))}
       </div>
 
       <div className="date-row">
@@ -486,7 +531,16 @@ export default function App() {
               <p className="empty">ヒットなし</p>
             ) : (
               hits.map((h) => (
-                <div key={h.conversation_id} className="result" onClick={() => openConversation(h.conversation_id)}>
+                <div
+                  key={h.item_id}
+                  className="result"
+                  onClick={() => {
+                    // conversations open in-app; external items open the
+                    // original page (read-only: Cairn holds only the index)
+                    if (h.conversation_id !== null) openConversation(h.conversation_id)
+                    else if (h.url) window.open(h.url, '_blank', 'noopener,noreferrer')
+                  }}
+                >
                   <div className="result-head">
                     <span className={`badge badge-${h.source}`}>{sourceLabel(h.source)}</span>
                     <span
@@ -506,7 +560,14 @@ export default function App() {
                         {h.semantic_score.toFixed(2)}
                       </span>
                     )}
-                    <span className="result-title">{h.title}</span>
+                    <span className="result-title">
+                      {h.title}
+                      {h.conversation_id === null && h.url && (
+                        <span className="ext-mark" title={h.url}>
+                          {' '}↗
+                        </span>
+                      )}
+                    </span>
                     <span className="result-date">{fmtDate(h.updated_at)}</span>
                   </div>
                   {h.matched_keywords.length > 0 && (

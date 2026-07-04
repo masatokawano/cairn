@@ -23,7 +23,7 @@ import httpx
 
 from .. import db
 from ..core import keychain
-from . import ConnectorError
+from . import ConnectorError, index_changed_items
 
 SERVICE = "brain-sync-zotero"
 SOURCE = "zotero"
@@ -143,6 +143,7 @@ def sync(
         db.set_sync_state(SOURCE, error=f"{type(exc).__name__}: {exc}")
         raise
 
+    index_stats = index_changed_items(stats["changed_ids"]) if stats["changed_ids"] else None
     links = db.rebuild_item_links() if stats["changed_ids"] else None
     db.set_sync_state(SOURCE, cursor={"library_version": library_version})
     return {
@@ -151,6 +152,7 @@ def sync(
         "inserted": stats["inserted"],
         "updated": stats["updated"],
         "skipped": stats["skipped"],
+        "index": index_stats,
         "links": links,
         "full": full,
     }
