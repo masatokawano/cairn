@@ -1,7 +1,9 @@
-"""Tests for the `cairn` CLI skeleton (backend/app/cli.py).
+"""Tests for the `cairn` CLI (backend/app/cli.py).
 
-At M0 only `sync conversations` is wired; the other subcommands must exit 1
-with a milestone-tagged message. `--help` must exit 0.
+Wired: `sync conversations` (M0) and `sync karakeep` / `sync zotero` (M1,
+tested here with the connector monkeypatched — connector internals are
+covered in test_connector_*.py). Remaining subcommands must exit 1 with a
+milestone-tagged message. `--help` must exit 0.
 """
 import importlib
 
@@ -37,8 +39,6 @@ def test_help_exits_zero(cli):
 
 
 @pytest.mark.parametrize("args,milestone", [
-    (["sync", "karakeep"], "M1"),
-    (["sync", "zotero"], "M1"),
     (["sync", "obsidian"], "M3"),
     (["sync", "all"], "M3"),
     (["review", "weekly"], "M4"),
@@ -51,6 +51,41 @@ def test_stub_subcommands_exit_one(cli, args, milestone):
     # stub messages go to stderr; CliRunner mixes streams by default.
     combined = result.stdout + (result.stderr if result.stderr_bytes is not None else "")
     assert milestone in combined
+
+
+@pytest.mark.parametrize("name", ["karakeep", "zotero"])
+def test_sync_connector_success_prints_stats(cli, monkeypatch, name):
+    import json
+    from app.connectors import karakeep, zotero
+    module = {"karakeep": karakeep, "zotero": zotero}[name]
+    seen = {}
+
+    def fake_sync(*, full=False, **kwargs):
+        seen["full"] = full
+        return {"source": name, "inserted": 2}
+
+    monkeypatch.setattr(module, "sync", fake_sync)
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["sync", name, "--full"])
+    assert result.exit_code == 0, result.output
+    assert seen["full"] is True
+    assert json.loads(result.stdout)["inserted"] == 2
+
+
+@pytest.mark.parametrize("name", ["karakeep", "zotero"])
+def test_sync_connector_failure_exits_nonzero(cli, monkeypatch, name):
+    from app.connectors import karakeep, zotero
+    module = {"karakeep": karakeep, "zotero": zotero}[name]
+
+    def fake_sync(**kwargs):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(module, "sync", fake_sync)
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["sync", name])
+    assert result.exit_code == 1
+    combined = result.stdout + (result.stderr if result.stderr_bytes is not None else "")
+    assert "sync failed" in combined
 
 
 def test_sync_conversations_runs_end_to_end(cli):

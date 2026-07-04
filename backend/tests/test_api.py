@@ -183,3 +183,16 @@ def test_db_file_permissions_0600(client, tmp_path):
     client.get("/api/stats")  # forces db.connect()
     mode = os.stat(tmp_path / "test.db").st_mode & 0o777
     assert mode == 0o600
+
+
+# --- /api/stats items breakdown (M1) -------------------------------------------
+
+def test_stats_includes_items_breakdown(client):
+    """DESIGN.md §7 M1 完了条件: /api/stats に items 内訳が出る。"""
+    _upload(client, chatgpt_fixture())
+    r = client.get("/api/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "item_links" in body
+    kinds = {row["kind"] for row in body["items"]}
+    assert "conversation" in kinds  # the uploaded fixture registered items

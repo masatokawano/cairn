@@ -143,6 +143,16 @@
 
 - 差分インポートは会話単位の content_hash 比較。一致→skip、不一致→
   メッセージ全削除して再挿入（メッセージ単位のマージはしない。シンプル優先）。
+- **外部 items（karakeep/zotero、M3 で obsidian 追加予定）の redaction は
+  `db.upsert_items` が唯一の choke point**。content_hash は redaction 後の
+  (title, url, url_norm, doi, meta) から db 層で計算する（タイムスタンプは
+  hash に含めない: dateModified だけ変わった項目を skip にするため）。
+  コネクタ側で redact や hash 計算をしないこと（upsert_conversations と同じ原則）。
+- **Karakeep v1 API には modified-since フィルタがない**。`sync karakeep` の増分は
+  createdAt desc + early-stop で「新規のみ」検知。既存ブックマークの編集
+  （タグ変更等）は `cairn sync karakeep --full` のスイープでしか拾えない
+  （content_hash skip でスイープ自体は安い）。Zotero は `since=<library version>` +
+  `Last-Modified-Version` ヘッダで真の増分が可能。
 - CLI同期はファイルの (mtime, size) を `ingest_files` に記録して変更検知。
   watchdogではなくポーリング（60秒、`CAIRN_SYNC_INTERVAL`で変更可）。
 - uvicornはスレッドプールでハンドラを動かすため、SQLite接続は

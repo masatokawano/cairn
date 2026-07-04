@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -886,6 +887,193 @@ def upsert_conversations(parsed_list) -> dict:
 def utcnow_iso() -> str:
     """Timestamp helper for import_runs (ISO8601, UTC)."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+# --- External items (M1, DESIGN.md §5.1) -------------------------------------
+
+def get_sync_state(source: str) -> dict | None:
+    """Return the sync cursor row for a connector source, cursor JSON-decoded."""
+    row = connect().execute(
+        "SELECT source, cursor, synced_at, last_error FROM sync_state WHERE source = ?",
+        (source,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "source": row["source"],
+        "cursor": json.loads(row["cursor"]),
+        "synced_at": row["synced_at"],
+        "last_error": row["last_error"],
+    }
+
+
+def set_sync_state(source: str, cursor: dict | None = None, error: str | None = None) -> None:
+    """Record a sync outcome. Success: pass the new cursor (clears last_error).
+    Failure: pass error only — the stored cursor is kept unchanged so the next
+    run retries the same window (DESIGN.md §5.1: 既存データは壊さない)."""
+    conn = connect()
+    with conn:
+        if error is None:
+            conn.execute(
+                """INSERT INTO sync_state (source, cursor, synced_at, last_error)
+                   VALUES (?, ?, ?, NULL)
+                   ON CONFLICT(source) DO UPDATE SET
+                     cursor = excluded.cursor,
+                     synced_at = excluded.synced_at,
+                     last_error = NULL""",
+                (source, json.dumps(cursor or {}, ensure_ascii=False), utcnow_iso()),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO sync_state (source, cursor, synced_at, last_error)
+                   VALUES (?, '{}', ?, ?)
+                   ON CONFLICT(source) DO UPDATE SET
+                     synced_at = excluded.synced_at,
+                     last_error = excluded.last_error""",
+                (source, utcnow_iso(), error),
+            )
+
+
+def _redact_tree(value):
+    """Apply secret redaction to every string in a JSON-ish structure."""
+    if isinstance(value, str):
+        return redact.redact(value)
+    if isinstance(value, list):
+        return [_redact_tree(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _redact_tree(v) for k, v in value.items()}
+    return value
+
+
+def upsert_items(source: str, kind: str, records: list[dict]) -> dict:
+    """Diff-import external items (M1: karakeep bookmarks, zotero references).
+
+    Mirrors upsert_conversations: secret redaction happens HERE, at the single
+    choke point for external-item ingest, and BEFORE content_hash — so
+    re-syncs of unchanged source data hash identically (skip), and a redaction
+    pattern update changes the hash and propagates on the next full sweep
+    (§6.3: 外部ソース由来テキストにも redaction を適用).
+
+    Each record: {external_id, title, url, url_norm, doi, created_at,
+    updated_at, meta: dict}. The content_hash covers the redacted
+    (title, url, url_norm, doi, meta) — timestamps excluded, so a pure
+    dateModified touch with identical content stays a skip.
+
+    Returns {"inserted", "updated", "skipped", "changed_ids"}.
+    """
+    conn = connect()
+    stats = {"inserted": 0, "updated": 0, "skipped": 0, "changed_ids": []}
+    with conn:
+        for rec in records:
+            title = redact.redact_title(rec.get("title") or "") or None
+            meta = _redact_tree(rec.get("meta") or {})
+            meta_json = json.dumps(meta, ensure_ascii=False, sort_keys=True)
+            basis = json.dumps(
+                [kind, title, rec.get("url"), rec.get("url_norm"), rec.get("doi"), meta],
+                ensure_ascii=False, sort_keys=True,
+            )
+            new_hash = hashlib.sha256(basis.encode()).hexdigest()
+            row = conn.execute(
+                "SELECT id, content_hash FROM items WHERE source = ? AND external_id = ?",
+                (source, rec["external_id"]),
+            ).fetchone()
+            if row is not None and row["content_hash"] == new_hash:
+                stats["skipped"] += 1
+                continue
+            cur = conn.execute(
+                """INSERT INTO items
+                     (kind, source, external_id, title, url, url_norm, doi,
+                      created_at, updated_at, content_hash, meta)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(source, external_id) DO UPDATE SET
+                     kind = excluded.kind,
+                     title = excluded.title,
+                     url = excluded.url,
+                     url_norm = excluded.url_norm,
+                     doi = excluded.doi,
+                     created_at = excluded.created_at,
+                     updated_at = excluded.updated_at,
+                     content_hash = excluded.content_hash,
+                     meta = excluded.meta
+                   RETURNING id""",
+                (kind, source, rec["external_id"], title, rec.get("url"),
+                 rec.get("url_norm"), rec.get("doi"), rec.get("created_at"),
+                 rec.get("updated_at"), new_hash, meta_json),
+            )
+            item_id = cur.fetchone()[0]
+            stats["inserted" if row is None else "updated"] += 1
+            stats["changed_ids"].append(item_id)
+    return stats
+
+
+def rebuild_item_links() -> dict:
+    """Full rebuild of item_links from scratch (M1, DESIGN.md §5.1 D5).
+
+    item_links is derived data: dropping and regenerating it is always safe
+    (invariant 3), and a full rebuild keeps this idempotent — no stale links
+    when an item's url_norm changes. Three key spaces, matched by exact
+    equality after normalisation:
+
+    - 'url'    — items.url_norm, plus URLs extracted from conversation
+                 message text (§7 M1: 会話本文中の URL 抽出→正規化→突合)
+    - 'doi'    — items.doi, plus doi.org URLs found in message text
+    - 'github' — repo-level keys derived from the above URLs
+
+    The message scan is a LIKE-prefiltered pass over messages.text on every
+    call; at personal-archive scale (~15k messages) this is a couple of
+    seconds. If it ever hurts, per-item key caching would need a schema
+    addition (DESIGN.md §4 change) — report, don't build it ad hoc.
+    """
+    from .core import urlnorm
+
+    conn = connect()
+    key_map: dict[tuple[str, str], set[int]] = {}
+
+    def add(via: str, key: str | None, item_id: int) -> None:
+        if key:
+            key_map.setdefault((via, key), set()).add(item_id)
+
+    for row in conn.execute(
+        "SELECT id, url_norm, doi FROM items WHERE url_norm IS NOT NULL OR doi IS NOT NULL"
+    ):
+        add("url", row["url_norm"], row["id"])
+        add("doi", row["doi"], row["id"])
+        if row["url_norm"]:
+            add("github", urlnorm.extract_github_repo(row["url_norm"]), row["id"])
+
+    for row in conn.execute(
+        """SELECT i.id AS item_id, m.text
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           JOIN items i ON i.source = c.source AND i.external_id = c.source_id
+           WHERE m.text LIKE '%http%'"""
+    ):
+        for raw in urlnorm.extract_urls(row["text"]):
+            norm, doi, github = urlnorm.url_keys(raw)
+            add("url", norm, row["item_id"])
+            add("doi", doi, row["item_id"])
+            add("github", github, row["item_id"])
+
+    pairs: set[tuple[int, int, str]] = set()
+    for (via, _key), ids in key_map.items():
+        if len(ids) < 2:
+            continue
+        ordered = sorted(ids)
+        for idx, a in enumerate(ordered):
+            for b in ordered[idx + 1:]:
+                pairs.add((a, b, via))
+
+    with conn:
+        conn.execute("DELETE FROM item_links")
+        conn.executemany(
+            "INSERT OR IGNORE INTO item_links (a_id, b_id, link_via) VALUES (?,?,?)",
+            sorted(pairs),
+        )
+    counts = {"url": 0, "doi": 0, "github": 0}
+    for _a, _b, via in pairs:
+        counts[via] += 1
+    counts["total"] = len(pairs)
+    return counts
 
 
 def _store_chunks(
@@ -1955,7 +2143,18 @@ def stats() -> dict:
            FROM conversations c LEFT JOIN messages m ON m.conversation_id = c.id
            GROUP BY c.source"""
     ).fetchall()
-    return {"sources": [dict(r) for r in rows]}
+    # items breakdown (M1): registry counts per kind/source + link total, so
+    # /api/stats shows the cross-source state (DESIGN.md §7 M1 完了条件).
+    item_rows = conn.execute(
+        "SELECT kind, source, COUNT(*) AS count FROM items GROUP BY kind, source"
+        " ORDER BY kind, source"
+    ).fetchall()
+    link_count = conn.execute("SELECT COUNT(*) FROM item_links").fetchone()[0]
+    return {
+        "sources": [dict(r) for r in rows],
+        "items": [dict(r) for r in item_rows],
+        "item_links": link_count,
+    }
 
 
 def iter_export_conversations(
