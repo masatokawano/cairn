@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.masato.cairn.sync</string>
+
+    <!-- hourly `cairn sync all`: conversations + karakeep + zotero +
+         obsidian, then the 90 Auto lists (DESIGN.md §5.7) -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{BACKEND_DIR}}/bin/cairn</string>
+        <string>sync</string>
+        <string>all</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{BACKEND_DIR}}</string>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{LOG_DIR}}/sync.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{LOG_DIR}}/sync-error.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- API keys stay in the Keychain (D8) — never here -->
+        <key>CAIRN_KARAKEEP_URL</key>
+        <string>{{KARAKEEP_URL}}</string>
+        <key>CAIRN_ZOTERO_USER_ID</key>
+        <string>{{ZOTERO_USER_ID}}</string>
+        <key>CAIRN_OBSIDIAN_VAULT</key>
+        <string>{{OBSIDIAN_VAULT}}</string>
+        <key>CAIRN_EXTERNAL_BRAIN_DIR</key>
+        <string>{{EXTERNAL_BRAIN_DIR}}</string>
+    </dict>
+</dict>
+</plist>

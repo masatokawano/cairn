@@ -1,24 +1,19 @@
-# ops/launchd — LaunchAgent templates (placeholder)
+# ops/launchd — Cairn LaunchAgents (M3)
 
-At M0 this directory is a placeholder for the plist templates that land in M3.
+Two agents replace the four legacy `com.masato.brain-sync.*` jobs
+(DESIGN.md §5.7):
 
-## Coming in M3 (DESIGN.md §5.7)
+| Agent | Schedule | Command |
+|---|---|---|
+| `com.masato.cairn.sync` | hourly + at load | `cairn sync all`（4 ソース同期 + 90 Auto 一覧） |
+| `com.masato.cairn.weekly` | 日曜 18:00 + at load | `cairn review weekly`（M4 で実装。それまでは exit 1） |
 
-Two LaunchAgents replace the four legacy `com.masato.brainsync.*` jobs (that
-today live in `~/workspace/brain-sync/`):
-
-- `com.masato.cairn.sync.plist.template` — hourly `cairn sync all`
-- `com.masato.cairn.weekly.plist.template` — Sunday 18:00 + at login, runs `cairn review weekly`
-
-Absolute paths (Python interpreter, project root, log directory) are variables
-in the templates so the install script (also M3) can materialise them for a
-specific host.
-
-Logs will land in `~/Library/Logs/cairn/`.
-
-## Legacy status
-
-The four legacy LaunchAgents at `~/workspace/brain-sync/` (`com.masato.brainsync.*`)
-keep running through M3. `cairn sync all` / `cairn review weekly` are stubs at
-M0 (see `backend/app/cli.py`), so the legacy jobs remain the source of truth
-for external-source sync until M1/M3 land. See DESIGN.md D11 and §9.
+- Templates: `*.plist.template` — absolute paths and per-host settings are
+  `{{VARS}}`, rendered by `install.sh`.
+- `install.sh` renders + copies to `~/Library/LaunchAgents` but does **not**
+  load anything: `launchctl bootstrap` / `bootout` は人間の明示操作
+  （AGENTS.md 不変条件 8）。
+- API keys are read from the Keychain at runtime (D8) — the plists carry
+  only non-secret settings (URLs, IDs, paths).
+- Logs: `~/Library/Logs/cairn/{sync,weekly}[-error].log`
+- 移行手順（旧 4 本の unload・削除・ロールバック）: `MIGRATION.md`

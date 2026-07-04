@@ -86,14 +86,49 @@ def sync_zotero(
 
 @sync_app.command("obsidian")
 def sync_obsidian() -> None:
-    """(Stub) Index the Obsidian vault — implemented in M3."""
-    _todo("sync obsidian", "M3")
+    """Index the Obsidian vault into the items registry (M3, read-only)."""
+    from .connectors import obsidian
+    _run_connector(obsidian.sync)
 
 
 @sync_app.command("all")
 def sync_all() -> None:
-    """(Stub) Sync every source in one pass — wired once M1 and M3 land."""
-    _todo("sync all", "M3 (needs M1 first)")
+    """Sync every source, then write the 90 Auto lists (M3, DESIGN.md §5.7).
+
+    One failing source must not starve the others (S4: 放置しても壊れない) —
+    each failure is recorded and the command exits non-zero at the end.
+    Connector failures are also in sync_state.last_error already.
+    """
+    from . import cli_sync
+    from .connectors import karakeep, obsidian, zotero
+
+    steps = [
+        ("conversations", cli_sync.scan_once),
+        ("karakeep", karakeep.sync),
+        ("zotero", zotero.sync),
+        ("obsidian", obsidian.sync),
+    ]
+    out: dict = {"sources": {}, "failed": []}
+    for name, fn in steps:
+        try:
+            out["sources"][name] = fn()
+        except Exception as exc:
+            out["sources"][name] = f"failed: {type(exc).__name__}: {exc}"
+            out["failed"].append(name)
+
+    # 90 Auto lists: regenerate whenever the vault is configured — cheap, and
+    # the lists must reflect deletions/edits even on all-skip syncs.
+    try:
+        from .deliver import auto_lists, obsidian_writer
+        paths = obsidian_writer.write_90_auto(auto_lists.generate_all())
+        out["auto_lists"] = [str(p) for p in paths]
+    except Exception as exc:
+        out["auto_lists"] = f"failed: {type(exc).__name__}: {exc}"
+        out["failed"].append("auto_lists")
+
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
+    if out["failed"]:
+        raise typer.Exit(code=1)
 
 
 @review_app.command("weekly")

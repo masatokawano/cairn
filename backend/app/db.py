@@ -1112,6 +1112,34 @@ def upsert_items(source: str, kind: str, records: list[dict]) -> dict:
     return stats
 
 
+def prune_items(source: str, *, keep_external_ids: list[str]) -> int:
+    """Remove registry entries for a source that no longer exist upstream
+    (M3: notes deleted/renamed in the Obsidian vault).
+
+    Only derived data is touched: the items rows, their item_text chunks
+    (embeddings CASCADE off chunks; chunks_fts via trigger). Originals —
+    conversations/messages — are never candidates because they are not
+    external-source items. Returns the number of items removed.
+    """
+    conn = connect()
+    keep = set(keep_external_ids)
+    rows = conn.execute(
+        "SELECT id, external_id FROM items WHERE source = ?", (source,)
+    ).fetchall()
+    stale = [r["id"] for r in rows if r["external_id"] not in keep]
+    if not stale:
+        return 0
+    with conn:
+        ph = ",".join("?" * len(stale))
+        conn.execute(f"DELETE FROM chunks WHERE item_id IN ({ph})", stale)
+        conn.execute(
+            f"DELETE FROM item_links WHERE a_id IN ({ph}) OR b_id IN ({ph})",
+            [*stale, *stale],
+        )
+        conn.execute(f"DELETE FROM items WHERE id IN ({ph})", stale)
+    return len(stale)
+
+
 def rebuild_item_links() -> dict:
     """Full rebuild of item_links from scratch (M1, DESIGN.md §5.1 D5).
 

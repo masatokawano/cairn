@@ -1,6 +1,10 @@
-"""Write side: Obsidian writer (allowlisted) and weekly-review renderer.
+"""Write side of Cairn.
 
-Populated by M3 (obsidian_writer) and M4 (weekly_review). Kept empty at M0.
+- `obsidian_writer.py` (M3) — the ONLY module that writes into the Obsidian
+  vault, gated by an allowlist + path validation.
+- `auto_lists.py` (M3) — generates the 90 Auto index markdown (content only,
+  no I/O).
+- `weekly_review.py` (M4) — weekly review renderer (not yet present).
 
 Invariant 2 (AGENTS.md): Obsidian writes are restricted to exactly three
 paths — `90 Auto/` (overwrite), `40 Reviews/Weekly/` (new only), and

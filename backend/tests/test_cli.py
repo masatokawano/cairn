@@ -39,8 +39,6 @@ def test_help_exits_zero(cli):
 
 
 @pytest.mark.parametrize("args,milestone", [
-    (["sync", "obsidian"], "M3"),
-    (["sync", "all"], "M3"),
     (["review", "weekly"], "M4"),
 ])
 def test_stub_subcommands_exit_one(cli, args, milestone):
@@ -71,6 +69,16 @@ def test_sync_connector_success_prints_stats(cli, monkeypatch, name):
     assert json.loads(result.stdout)["inserted"] == 2
 
 
+def test_sync_obsidian_wired(cli, monkeypatch):
+    import json
+    from app.connectors import obsidian
+    monkeypatch.setattr(obsidian, "sync", lambda: {"source": "obsidian", "inserted": 3})
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["sync", "obsidian"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["inserted"] == 3
+
+
 @pytest.mark.parametrize("name", ["karakeep", "zotero"])
 def test_sync_connector_failure_exits_nonzero(cli, monkeypatch, name):
     from app.connectors import karakeep, zotero
@@ -99,6 +107,52 @@ def test_sync_conversations_runs_end_to_end(cli):
     assert payload["files_scanned"] == 0
     assert payload["files_imported"] == 0
     assert payload["inserted"] == 0
+
+
+@pytest.fixture()
+def sync_all_env(cli, tmp_path, monkeypatch):
+    """Vault fixture + fake external connectors for `sync all` tests."""
+    vault = tmp_path / "vault"
+    (vault / "External Brain" / "90 Auto").mkdir(parents=True)
+    (vault / "External Brain" / "10 Themes").mkdir(parents=True)
+    monkeypatch.setenv("CAIRN_OBSIDIAN_VAULT", str(vault))
+    from app.connectors import karakeep, zotero
+    monkeypatch.setattr(karakeep, "sync", lambda **kw: {"source": "karakeep", "skipped": 1})
+    monkeypatch.setattr(zotero, "sync", lambda **kw: {"source": "zotero", "skipped": 1})
+    return vault
+
+
+def test_sync_all_runs_every_source_and_writes_lists(cli, sync_all_env):
+    import json
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["sync", "all"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert set(payload["sources"]) == {"conversations", "karakeep", "zotero", "obsidian"}
+    assert payload["failed"] == []
+    auto_dir = sync_all_env / "External Brain" / "90 Auto"
+    written = {p.name for p in auto_dir.glob("*.md")}
+    assert written == {"karakeep-to-review.md", "cairn-recent.md",
+                       "zotero-recent.md", "obsidian-context.md"}
+
+
+def test_sync_all_continues_past_a_failing_source(cli, sync_all_env, monkeypatch):
+    import json
+    from app.connectors import karakeep
+    def boom(**kw):
+        raise RuntimeError("connection refused")
+    monkeypatch.setattr(karakeep, "sync", boom)
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["sync", "all"])
+    assert result.exit_code == 1  # failure surfaced ...
+    payload = json.loads(result.stdout)
+    assert payload["failed"] == ["karakeep"]
+    assert "connection refused" in payload["sources"]["karakeep"]
+    # ... but every other source still ran, and the lists were still written
+    assert payload["sources"]["zotero"] == {"source": "zotero", "skipped": 1}
+    assert isinstance(payload["sources"]["obsidian"], dict)
+    auto_dir = sync_all_env / "External Brain" / "90 Auto"
+    assert len(list(auto_dir.glob("*.md"))) == 4
 
 
 def test_index_rebuild_runs_on_empty_db(cli):

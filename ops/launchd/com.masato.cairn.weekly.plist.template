@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.masato.cairn.weekly</string>
+
+    <!-- Sunday 18:00 `cairn review weekly` (DESIGN.md §5.7). Until M4 lands
+         the subcommand exits 1 with a milestone note — the agent can be
+         installed now and starts producing reviews the moment M4 ships. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{BACKEND_DIR}}/bin/cairn</string>
+        <string>review</string>
+        <string>weekly</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{{BACKEND_DIR}}</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>18</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{LOG_DIR}}/weekly.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{LOG_DIR}}/weekly-error.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CAIRN_OBSIDIAN_VAULT</key>
+        <string>{{OBSIDIAN_VAULT}}</string>
+        <key>CAIRN_EXTERNAL_BRAIN_DIR</key>
+        <string>{{EXTERNAL_BRAIN_DIR}}</string>
+    </dict>
+</dict>
+</plist>
