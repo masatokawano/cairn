@@ -32,11 +32,9 @@ def make_conv(source_id, text, *, title="会話"):
 
 
 def add_bookmark(db, external_id, url, **meta):
-    from app.core import urlnorm
-    norm = urlnorm.normalize_url(url)
+    # url_norm / doi are derived inside upsert_items (redaction choke point)
     return db.upsert_items("karakeep", "bookmark", [{
         "external_id": external_id, "title": external_id, "url": url,
-        "url_norm": norm, "doi": urlnorm.normalize_doi(norm),
         "created_at": "2026-06-10T00:00:00Z", "updated_at": "2026-06-10T00:00:00Z",
         "meta": meta,
     }])
@@ -73,8 +71,8 @@ def test_bookmark_and_conversation_share_url(db):
 def test_doi_links_reference_to_bookmark(db):
     """Zotero reference (DOI field) ↔ Karakeep bookmark of the doi.org URL."""
     db.upsert_items("zotero", "reference", [{
-        "external_id": "KEY1", "title": "論文", "url": None, "url_norm": None,
-        "doi": "10.1038/s41586-023-06004-9",
+        "external_id": "KEY1", "title": "論文", "url": None,
+        "doi": "10.1038/S41586-023-06004-9",  # raw; normalised at the choke point
         "created_at": None, "updated_at": None, "meta": {},
     }])
     add_bookmark(db, "bm-doi", "https://doi.org/10.1038/S41586-023-06004-9")
@@ -142,6 +140,20 @@ def test_stats_includes_items_breakdown(db):
     assert by_key[("conversation", "chatgpt")] == 1
     assert by_key[("bookmark", "karakeep")] == 1
     assert s["item_links"] == 0
+
+
+def test_url_columns_redacted_at_choke_point(db):
+    """Codex M1 review should #1: a token inside a bookmark URL must not
+    survive in url / url_norm / doi — url_norm is derived from the redacted
+    url inside upsert_items, not pre-computed by connectors."""
+    add_bookmark(db, "bm-leak",
+                 "https://example.com/callback?token=sk-abcdefghijklmnopqrstuvwxyz1234")
+    row = db.connect().execute(
+        "SELECT url, url_norm, doi FROM items WHERE external_id='bm-leak'"
+    ).fetchone()
+    assert "sk-abcdefghijklmnop" not in (row["url"] or "")
+    assert "sk-abcdefghijklmnop" not in (row["url_norm"] or "")
+    assert "[REDACTED:openai]" in row["url"]
 
 
 def test_upsert_items_skip_then_update(db):

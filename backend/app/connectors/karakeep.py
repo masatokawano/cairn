@@ -8,12 +8,13 @@ Config: ``CAIRN_KARAKEEP_URL`` (base URL, e.g. https://karakeep.example.com).
 Auth: Keychain service ``brain-sync-karakeep`` (D8), account = login user.
 
 Incremental model: the v1 API has no modified-since filter, so we fetch
-newest-first (createdAt desc, cursor pagination) and stop as soon as a whole
-page is at-or-older than the stored ``last_created_at`` — that boundary page
-is still upserted, so same-timestamp arrivals are not lost, and content_hash
-comparison turns the overlap into skips. Consequence: edits to bookmarks
-older than the cursor (tag changes etc.) are only picked up by
-``cairn sync karakeep --full``, which sweeps every page.
+newest-first (createdAt desc, cursor pagination) and stop once a whole page
+is strictly older than the stored ``last_created_at`` — pages still touching
+the boundary timestamp keep pagination alive, so a run of same-createdAt
+arrivals spanning pages is not lost, and content_hash comparison turns the
+overlap into skips. Consequence: edits to bookmarks older than the cursor
+(tag changes etc.) are only picked up by ``cairn sync karakeep --full``,
+which sweeps every page.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ import os
 import httpx
 
 from .. import db
-from ..core import keychain, urlnorm
+from ..core import keychain
 from . import ConnectorError
 
 SERVICE = "brain-sync-karakeep"
@@ -78,7 +79,6 @@ def to_record(bm: dict) -> dict:
         t["name"] for t in bm.get("tags") or []
         if isinstance(t, dict) and t.get("name")
     ]
-    url_norm = urlnorm.normalize_url(url)
     meta = {
         "type": content.get("type"),
         "tags": tags,
@@ -90,12 +90,12 @@ def to_record(bm: dict) -> dict:
         "archived": bm.get("archived"),
     }
     meta = {k: v for k, v in meta.items() if v not in (None, "", [], False)}
+    # url_norm / doi are derived in db.upsert_items from the redacted url —
+    # never pre-computed here (redaction choke point).
     return {
         "external_id": bm["id"],
         "title": title,
         "url": url,
-        "url_norm": url_norm,
-        "doi": urlnorm.normalize_doi(url_norm),
         "created_at": bm.get("createdAt"),
         "updated_at": bm.get("modifiedAt") or bm.get("createdAt"),
         "meta": meta,
@@ -133,10 +133,15 @@ def sync(
                 if rec["created_at"] and (newest is None or rec["created_at"] > newest):
                     newest = rec["created_at"]
                 records.append(rec)
+            # Stop only when the whole page is STRICTLY older than the cursor:
+            # a run of bookmarks sharing the boundary createdAt can span pages,
+            # and their order within the run is unspecified, so any page still
+            # touching the boundary timestamp must keep pagination alive
+            # (Codex M1 review, should #2).
             if last_created and bookmarks and all(
-                (bm.get("createdAt") or "") <= last_created for bm in bookmarks
+                (bm.get("createdAt") or "") < last_created for bm in bookmarks
             ):
-                break  # boundary page already appended; older pages are synced
+                break
             cursor = page.get("nextCursor")
             if not cursor:
                 break

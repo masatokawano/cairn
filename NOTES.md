@@ -144,10 +144,13 @@
 - 差分インポートは会話単位の content_hash 比較。一致→skip、不一致→
   メッセージ全削除して再挿入（メッセージ単位のマージはしない。シンプル優先）。
 - **外部 items（karakeep/zotero、M3 で obsidian 追加予定）の redaction は
-  `db.upsert_items` が唯一の choke point**。content_hash は redaction 後の
-  (title, url, url_norm, doi, meta) から db 層で計算する（タイムスタンプは
-  hash に含めない: dateModified だけ変わった項目を skip にするため）。
-  コネクタ側で redact や hash 計算をしないこと（upsert_conversations と同じ原則）。
+  `db.upsert_items` が唯一の choke point**。url_norm / doi も db 層が
+  「redact 済み url」から導出する（コネクタは raw の url / doi を渡すだけ。
+  URL query に混ざった API key が url_norm に平文で残る穴を防ぐ + 会話経路の
+  「redact → 抽出 → 正規化」と順序が揃う。Codex M1 レビュー指摘）。
+  content_hash は redaction 後の (title, url, url_norm, doi, meta) から計算
+  （タイムスタンプは hash に含めない: dateModified だけの変更を skip にするため）。
+  コネクタ側で redact / 正規化 / hash 計算をしないこと。
 - **Karakeep v1 API には modified-since フィルタがない**。`sync karakeep` の増分は
   createdAt desc + early-stop で「新規のみ」検知。既存ブックマークの編集
   （タグ変更等）は `cairn sync karakeep --full` のスイープでしか拾えない

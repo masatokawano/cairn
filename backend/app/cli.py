@@ -19,7 +19,7 @@ import typer
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="Cairn integration CLI (M0 skeleton).",
+    help="Cairn integration CLI (sync / review / index).",
 )
 
 sync_app = typer.Typer(

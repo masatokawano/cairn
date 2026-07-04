@@ -22,7 +22,7 @@ import os
 import httpx
 
 from .. import db
-from ..core import keychain, urlnorm
+from ..core import keychain
 from . import ConnectorError
 
 SERVICE = "brain-sync-zotero"
@@ -72,11 +72,13 @@ def _creator_name(creator: dict) -> str:
 
 
 def to_record(item: dict) -> dict:
-    """Map one Zotero item JSON object to an upsert_items record."""
+    """Map one Zotero item JSON object to an upsert_items record.
+
+    url_norm / doi normalisation happens in db.upsert_items on the redacted
+    values (redaction choke point) — the DOI is passed through raw, and the
+    doi.org-URL fallback also lives there."""
     data = item.get("data") or {}
     url = data.get("url") or None
-    url_norm = urlnorm.normalize_url(url)
-    doi = urlnorm.normalize_doi(data.get("DOI")) or urlnorm.normalize_doi(url_norm)
     creators = [n for n in (_creator_name(c) for c in data.get("creators") or []) if n]
     tags = [
         t["tag"] for t in data.get("tags") or []
@@ -95,8 +97,7 @@ def to_record(item: dict) -> dict:
         "external_id": item["key"],
         "title": (data.get("title") or None),
         "url": url,
-        "url_norm": url_norm,
-        "doi": doi,
+        "doi": data.get("DOI") or None,
         "created_at": data.get("dateAdded"),
         "updated_at": data.get("dateModified"),
         "meta": meta,

@@ -118,6 +118,29 @@ def test_incremental_stops_at_cursor(db):
     assert db.get_sync_state("karakeep")["cursor"]["last_created_at"] == "2026-07-02T00:00:00Z"
 
 
+def test_boundary_timestamp_run_spanning_pages_not_lost(db):
+    """Codex M1 review should #2: a new bookmark sharing the cursor's exact
+    createdAt but sitting on a LATER page must still be fetched — pagination
+    only stops once a whole page is strictly older than the cursor."""
+    sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_MID, B_OLD], "nextCursor": None}}, []))
+    assert db.get_sync_state("karakeep")["cursor"]["last_created_at"] == B_MID["createdAt"]
+
+    same_ts = bookmark("bm-8", B_MID["createdAt"],
+                       url="https://example.com/same-second", title="SameTS")
+    log = []
+    stats = sync_karakeep(client=paged_transport({
+        None: {"bookmarks": [B_MID], "nextCursor": "p2"},
+        "p2": {"bookmarks": [same_ts], "nextCursor": "p3"},
+        "p3": {"bookmarks": [B_OLD], "nextCursor": None},
+    }, log))
+
+    assert log == [None, "p2", "p3"], "pages touching the boundary keep pagination alive"
+    assert stats["inserted"] == 1  # bm-8 recovered from page 2
+    assert db.connect().execute(
+        "SELECT COUNT(*) FROM items WHERE external_id='bm-8'").fetchone()[0] == 1
+
+
 def test_resync_unchanged_is_all_skips(db):
     pages = {None: {"bookmarks": [B_OLD, B_MID], "nextCursor": None}}
     sync_karakeep(client=paged_transport(dict(pages), []))

@@ -13,6 +13,7 @@ import threading
 
 from . import redact
 from .chunking import CURRENT_CHUNKING_VERSION, chunk_text
+from .core import urlnorm
 from .embedding import EmbeddingProvider
 from .vector_index import NumpyIndex, SQLiteVecIndex, VectorIndex, try_load_sqlite_vec
 
@@ -954,10 +955,15 @@ def upsert_items(source: str, kind: str, records: list[dict]) -> dict:
     pattern update changes the hash and propagates on the next full sweep
     (§6.3: 外部ソース由来テキストにも redaction を適用).
 
-    Each record: {external_id, title, url, url_norm, doi, created_at,
-    updated_at, meta: dict}. The content_hash covers the redacted
-    (title, url, url_norm, doi, meta) — timestamps excluded, so a pure
-    dateModified touch with identical content stays a skip.
+    Each record: {external_id, title, url, doi (raw, optional), created_at,
+    updated_at, meta: dict}. url_norm / doi are derived HERE, from the
+    already-redacted url — connectors must not pre-compute them. That keeps a
+    token in a URL query string out of every column (Codex M1 review, should
+    #1) and matches the conversation path's ordering (redact → extract →
+    normalise), so both sides of a link derive keys from redacted text.
+    The content_hash covers the redacted (title, url, url_norm, doi, meta) —
+    timestamps excluded, so a pure dateModified touch with identical content
+    stays a skip.
 
     Returns {"inserted", "updated", "skipped", "changed_ids"}.
     """
@@ -966,10 +972,17 @@ def upsert_items(source: str, kind: str, records: list[dict]) -> dict:
     with conn:
         for rec in records:
             title = redact.redact_title(rec.get("title") or "") or None
+            url = redact.redact(rec["url"]) if rec.get("url") else None
+            url_norm = urlnorm.normalize_url(url)
+            doi_raw = rec.get("doi")
+            doi = (
+                urlnorm.normalize_doi(redact.redact(doi_raw) if doi_raw else None)
+                or urlnorm.normalize_doi(url_norm)
+            )
             meta = _redact_tree(rec.get("meta") or {})
             meta_json = json.dumps(meta, ensure_ascii=False, sort_keys=True)
             basis = json.dumps(
-                [kind, title, rec.get("url"), rec.get("url_norm"), rec.get("doi"), meta],
+                [kind, title, url, url_norm, doi, meta],
                 ensure_ascii=False, sort_keys=True,
             )
             new_hash = hashlib.sha256(basis.encode()).hexdigest()
@@ -996,9 +1009,8 @@ def upsert_items(source: str, kind: str, records: list[dict]) -> dict:
                      content_hash = excluded.content_hash,
                      meta = excluded.meta
                    RETURNING id""",
-                (kind, source, rec["external_id"], title, rec.get("url"),
-                 rec.get("url_norm"), rec.get("doi"), rec.get("created_at"),
-                 rec.get("updated_at"), new_hash, meta_json),
+                (kind, source, rec["external_id"], title, url, url_norm, doi,
+                 rec.get("created_at"), rec.get("updated_at"), new_hash, meta_json),
             )
             item_id = cur.fetchone()[0]
             stats["inserted" if row is None else "updated"] += 1
@@ -1024,8 +1036,6 @@ def rebuild_item_links() -> dict:
     seconds. If it ever hurts, per-item key caching would need a schema
     addition (DESIGN.md §4 change) — report, don't build it ad hoc.
     """
-    from .core import urlnorm
-
     conn = connect()
     key_map: dict[tuple[str, str], set[int]] = {}
 
