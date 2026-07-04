@@ -648,11 +648,16 @@ WHEN old.kind = 'item_text' BEGIN
     DELETE FROM chunks_fts WHERE rowid = old.id;
     INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
 END;
+DELETE FROM chunks_fts;
 INSERT INTO chunks_fts(rowid, text)
     SELECT id, text FROM chunks WHERE kind = 'item_text';
 COMMIT;
 PRAGMA foreign_keys=ON;
 """
+# ^ the DELETE makes the backfill re-runnable: if user_version is rolled back
+# to 11 on an already-v12 DB that has item_text chunks, a plain INSERT would
+# collide on rowid (Codex M2 review, should #2). Everything runs in one
+# transaction, so a crashed first run leaves no partial state either.
 
 _SCHEMA_VERSION = 12
 _MIGRATIONS: list[tuple[int, str]] = [
@@ -2244,7 +2249,7 @@ def _keyword_item_rows(
             "kind": r["kind"],
             "source": r["source"],
             "title": r["title"],
-            "url": r["url"],
+            "url": _safe_external_url(r["url"]),
             "external_id": r["external_id"],
             "updated_at": r["updated_at"] or r["created_at"],
             "meta": json.loads(r["meta"] or "{}"),
@@ -2257,6 +2262,18 @@ def _keyword_item_rows(
             "semantic_score": None,
         })
     return results
+
+
+def _safe_external_url(url: str | None) -> str | None:
+    """Gate external-item URLs to http(s) before they reach search results.
+
+    items.url keeps the redacted raw value (any scheme) for provenance, but
+    search consumers treat url as an ACTION target (window.open in the UI,
+    link-out in future MCP responses) — a javascript:/data: URL saved in a
+    malicious bookmark must not flow there (Codex M2 review, should #1)."""
+    if url and re.match(r"^https?://", url, re.IGNORECASE):
+        return url
+    return None
 
 
 def _extract_highlighted(snippet: str) -> list[str]:
@@ -2396,7 +2413,7 @@ def _hydrate_semantic(hits: list[dict], counts: dict[int, int]) -> list[dict]:
             "item_id": h["item_id"],
             "kind": h["kind"],
             "source": h["source"],
-            "url": h["url"],
+            "url": _safe_external_url(h["url"]),
             "external_id": h["external_id"],
             "snippet": snip,
             "message_id": h["message_id"],

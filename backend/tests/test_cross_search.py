@@ -143,18 +143,63 @@ def test_source_filter_selects_item_source(db):
     assert [r["source"] for r in res] == ["karakeep"]
 
 
+# The exact result-row contract: pre-M2 fields + the M2 additions. Pinned as
+# a set so an accidental field rename/removal (a breaking API change for the
+# UI and MCP consumers) fails loudly (Codex M2 review, should #3).
+_PRE_M2_FIELDS = {
+    "conversation_id", "source", "title", "updated_at", "meta", "snippet",
+    "role", "message_id", "hit_count", "match_reason", "matched_keywords",
+    "semantic_score",
+}
+_M2_FIELDS = {"kind", "item_id", "url", "external_id"}
+
+
 def test_conversation_only_archive_results_unchanged(db):
-    """Regression: with no external items, keyword results keep the pre-M2
-    ordering/paging (SQL path) and now carry the M2 fields."""
+    """Regression: with no external items, keyword search must behave exactly
+    as pre-M2 — the conversation-only SQL path with SQL paging — with the M2
+    fields added purely additively."""
     db.upsert_conversations([
-        make_conv("c1", "regression テスト対象の本文"),
+        make_conv("c1", "regression 一件目の本文。regression regression 頻出。"),
         make_conv("c2", "regression 二件目の本文"),
     ])
     res = db.search("regression")
     assert len(res) == 2
+    # exact field contract: nothing renamed or dropped, only M2 additions
+    for r in res:
+        assert set(r.keys()) == _PRE_M2_FIELDS | _M2_FIELDS
+    # pre-M2 field semantics intact
     assert all(r["kind"] == "conversation" for r in res)
     assert all(r["url"] is None for r in res)
     assert all(r["item_id"] is not None for r in res)
+    assert all(r["match_reason"] == "keyword" for r in res)
+    assert all("[[" in r["snippet"] or r["matched_keywords"] for r in res)
+    assert all(r["hit_count"] >= 1 for r in res)
+    # bm25: c1 mentions the term 3x → must outrank c2 (pre-M2 rank ordering)
+    assert [r["conversation_id"] for r in res] == [1, 2]
+    # SQL paging path: page slices reproduce the full list exactly
+    page0 = db.search("regression", limit=1, offset=0)
+    page1 = db.search("regression", limit=1, offset=1)
+    assert [page0[0], page1[0]] == res
+
+
+def test_non_http_url_not_actionable_in_results(db):
+    """Codex M2 review should #1: a saved bookmark whose URL is not http(s)
+    (javascript:, data:, …) must surface with url=None in search results —
+    the UI treats url as a window.open target."""
+    stats = db.upsert_items("karakeep", "bookmark", [{
+        "external_id": "bm-evil", "title": "evilscheme クリック誘導",
+        "url": "javascript:alert(1)",
+        "created_at": "2026-06-10T00:00:00Z", "updated_at": "2026-06-10T00:00:00Z",
+        "meta": {},
+    }])
+    db.rechunk_items(stats["changed_ids"], force=True)
+    res = db.search("evilscheme")
+    assert len(res) == 1
+    assert res[0]["url"] is None
+    # provenance row itself keeps the raw (redacted) value
+    raw = db.connect().execute(
+        "SELECT url FROM items WHERE external_id='bm-evil'").fetchone()[0]
+    assert raw == "javascript:alert(1)"
 
 
 def test_like_fallback_covers_items(db):
@@ -231,6 +276,35 @@ def test_semantic_kinds_filter(db, monkeypatch):
 
 
 # --- migration v12 ---------------------------------------------------------------
+
+def test_migration_v12_rerun_with_item_chunks_is_safe(db):
+    """Codex M2 review should #2: re-running v12 on an already-v12 DB that
+    has item_text chunks (user_version rolled back to 11) must not collide
+    on chunks_fts rowids, and must leave the partial index exact."""
+    stats = db.upsert_items("karakeep", "bookmark", [{
+        "external_id": "bm-1", "title": "rerun 検証ブックマーク",
+        "url": "https://example.com/rerun",
+        "created_at": "2026-06-10T00:00:00Z", "updated_at": "2026-06-10T00:00:00Z",
+        "meta": {"description": "再実行の安全性"},
+    }])
+    db.rechunk_items(stats["changed_ids"], force=True)
+    conn = db.connect()
+    n_chunks = conn.execute(
+        "SELECT COUNT(*) FROM chunks WHERE kind='item_text'").fetchone()[0]
+    assert n_chunks >= 1
+    with conn:
+        conn.execute("PRAGMA user_version = 11")
+    conn.close()
+    db._local.conn = None
+
+    conn = db.connect()  # re-runs migration 12 over the v12-shaped DB
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    fts_ids = sorted(r[0] for r in conn.execute("SELECT rowid FROM chunks_fts"))
+    item_ids = sorted(r[0] for r in conn.execute(
+        "SELECT id FROM chunks WHERE kind='item_text'"))
+    assert fts_ids == item_ids  # no dupes, no strays
+    assert db.search("rerun")[0]["kind"] == "bookmark"  # still searchable
+
 
 def test_migration_v12_rebuilds_chunks_preserving_ids(db, tmp_path, monkeypatch):
     """Seed a v11-shape DB (NOT NULL chunks, no chunks_fts), reopen, and

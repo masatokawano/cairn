@@ -211,6 +211,12 @@
   （`cairn index rebuild` 実装参照）。
 - main.py に Phase 3 の `_VALID_KINDS`（assertion 種別）が既にある。items.kind の
   検証セットは `_SEARCH_KINDS`。同名で足すと後勝ちで静かに壊れる。
+- **既知の限界（Codex M2 レビュー nit、意図的に未対応）**: chunks_fts の UPDATE
+  トリガは `UPDATE OF text WHEN old.kind='item_text'` のみで、直接 SQL で
+  `chunks.kind` を書き換えると部分索引性が崩れ得る。コード経路に kind の UPDATE は
+  存在せず（rechunk は delete→insert）、修正には v13 migration（トリガ差し替え）か
+  fresh/migrated の schema 乖離が必要なため見送り。kind を UPDATE する変更を
+  入れる際はトリガも `UPDATE OF text, kind` + new.kind 条件へ差し替えること。
 
 ## スキーマ migration（P1-A / `db.py`）
 

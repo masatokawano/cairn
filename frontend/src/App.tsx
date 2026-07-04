@@ -536,9 +536,13 @@ export default function App() {
                   className="result"
                   onClick={() => {
                     // conversations open in-app; external items open the
-                    // original page (read-only: Cairn holds only the index)
+                    // original page (read-only: Cairn holds only the index).
+                    // scheme guard duplicates the backend's _safe_external_url
+                    // — defense in depth for an untrusted, external-origin URL
                     if (h.conversation_id !== null) openConversation(h.conversation_id)
-                    else if (h.url) window.open(h.url, '_blank', 'noopener,noreferrer')
+                    else if (h.url && /^https?:\/\//i.test(h.url)) {
+                      window.open(h.url, '_blank', 'noopener,noreferrer')
+                    }
                   }}
                 >
                   <div className="result-head">
