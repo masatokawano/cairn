@@ -276,6 +276,31 @@
   `_llm_line`（区切りマーカー除去 + 長さ制限）で洗う。プロンプト改訂時は
   `PROMPT_VERSION` を上げる。
 
+## 横断 MCP サーバ（M5 / `app/mcp/` + `run_mcp.py`）
+
+- **`import mcp` 衝突は起動スクリプトの「ディレクトリ」で決まる**。旧
+  `app/mcp_server.py` はスクリプトパス起動で `sys.path[0]=backend/app/` になり、
+  `app/mcp/` パッケージを作った瞬間 `import mcp`（SDK）がローカルへ解決されて壊れる
+  （NOTES 末尾 M0 逸脱で予告済み）。**解決＝ランチャ `backend/run_mcp.py`**：スクリプト
+  dir が `backend/`（`mcp` という名の子が無い）になるので `import mcp` は SDK に解決。
+  登録は「パッケージ（`-m app.mcp`）ではなくランチャ絶対パス」を指す。pytest も cwd=
+  `backend/` なので同様に SDK 解決（`app.mcp` は別ドット名で衝突しない）。**`app/mcp/` を
+  作った以上、旧 `mcp_server.py` のスクリプトパス登録は次回 spawn で必ず import 失敗する**
+  ため、パッケージ新設・旧ファイル削除・再登録はワンセット。
+- **`build_context_pack` の seed は kind 別に検索する**。単一のブレンド検索
+  （全 kind を1つの top-N で競わせる）だと、実データでは会話が上位を占めて
+  Zotero/Karakeep が top-24 から押し出され、根拠バケットが 0 件になる（実 DB で確認）。
+  `_VISION_KINDS` / `_EVIDENCE_KINDS` を `db.search(kinds=...)` で別々に引いて各バケットの
+  代表性を保証する。過去の議論は seed と重なりやすいので related() を `k*3` で広めに取り、
+  seed 済み item を除いた残りから bucket_k を取る。
+- **未解決課題は抽出しない**（D2 非目標）。content バケットは source/kind による構造的
+  グルーピングのみ（週次の 発見/思考/根拠/理解 と同じ発想）。「未解決」は `synthesize=True`
+  時の LLM 合成が資料から起こす（§6.2 の合成部）。合成は既定 off で毎回 ollama を呼ばず、
+  失敗時は `synthesized=null`＋`synthesis_note` へ縮退（content は無傷、S4）。
+- テストで `MAX_BODY_CHARS` を差し替えるときは **`server.MAX_BODY_CHARS`** を monkeypatch
+  する（`server` は `from . import MAX_BODY_CHARS` で自 module に束ねているため、パッケージ
+  `app.mcp` 側の属性を差し替えても効かない）。
+
 ## スキーマ migration（P1-A / `db.py`）
 
 - バージョンは `PRAGMA user_version`。2つの仕組みを併用する:
@@ -463,3 +488,6 @@ deliver/ mcp/ cli.py` の骨格を挙げているが、M0 では以下 2 箇所�
   解決されて MCP サーバが起動不能になる。稼働中のユーザー MCP を壊す代償は
   §3 との名前一致より重い。M5（MCP サーバ統合）で `mcp_server.py` を廃止し
   `python -m app.<新名>` 形式へ移す際に、起動方式ごと解決する。
+  **→ M5 で解決済み**: `app/mcp/` を新設し、起動はランチャ `backend/run_mcp.py`
+  （スクリプト dir = `backend/` なので `import mcp` は SDK 解決）に移行、
+  `mcp_server.py` は廃止。詳細は上の「横断 MCP サーバ（M5）」節。

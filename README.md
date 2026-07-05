@@ -127,23 +127,38 @@ ZIPのまま、または中のJSONファイルを、Cairnの画面にドラッ�
 
 ## MCPサーバー（エージェントからアーカイブを参照する）
 
-Cairn は読み取り専用のMCPサーバー（STDIO）を同梱しています。claude CLI / codex /
-Claude Desktop に登録すると、エージェントが「過去に何を調べてどう結論したか」を
-アーカイブから自力で検索できます。ツールは3つ、すべて読み取り専用です:
+Cairn は読み取り専用の横断MCPサーバー（STDIO）を同梱しています。claude CLI / codex /
+Claude Desktop に登録すると、エージェントが AI 会話・Karakeep・Zotero・Obsidian を
+横断して「過去に何を調べてどう結論したか」「あるテーマの構想・根拠・議論」を
+自力で参照できます。ツールは4つ、すべて読み取り専用です（DESIGN.md §5.6）:
 
-- `search_conversations` — キーワード横断検索（ソース・期間絞り込み、最大10件/回）
-- `get_conversation` — 会話IDでフルスレッド取得（約8,000字ずつ、続きは `start_message` で）
-- `list_recent_conversations` — 直近N日の会話一覧
+- `search_all` — 4系統横断のキーワード/意味/ハイブリッド検索（kind・ソース・期間
+  絞り込み、最大10件/回）。各結果に kind/source/url/provenance
+- `get_item` — `(source, external_id)` で1件を取得（会話はフルスレッドを約8,000字ずつ、
+  続きは `start_message` で。外部 item は索引メタ+原本URL+本文）
+- `build_context_pack` — テーマ横断パック。構想（会話）/ 根拠（Zotero・Karakeep・
+  強い一致リンク）/ 過去の議論（再浮上）を provenance 付きで構成。`synthesize=true` で
+  ローカル ollama による未解決課題込みの草案（`generated_by:` ラベル付き。既定は付けない）
+- `get_recent_activity` — 直近N日の横断アクティビティ要約（新セッションの立ち上げ用）
 
-Web UIサーバーの起動は不要です（MCPサーバーが直接DBを読みます）。
+応答テキストは untrusted データとして区切り（`<<<CAIRN_ARCHIVE_DATA …>>>`）で
+囲まれます。`build_context_pack` は原文引用（`content`）と Cairn 生成の合成
+（`synthesized`）を構造的に分離します（DESIGN.md §6.2）。
 
-### claude CLI（検証済み）
+Web UIサーバーの起動は不要です（MCPサーバーが直接DBを読みます）。登録には
+**パッケージではなくランチャ `backend/run_mcp.py` の絶対パス**を指定してください
+（`import mcp` を SDK に解決させるため。詳細は run_mcp.py の docstring）。
+
+### claude CLI
 
 ```bash
 claude mcp add cairn -s user -- \
-  /path/to/cairn/backend/.venv/bin/python /path/to/cairn/backend/app/mcp_server.py
+  /path/to/cairn/backend/.venv/bin/python /path/to/cairn/backend/run_mcp.py
 claude mcp list   # cairn: ✔ Connected と出ればOK
 ```
+
+> 旧バージョン（`app/mcp_server.py`、3ツール）を登録済みの場合は
+> `claude mcp remove cairn` してから上記で登録し直してください。
 
 ### codex CLI（手順のみ・未検証）
 
@@ -152,7 +167,7 @@ claude mcp list   # cairn: ✔ Connected と出ればOK
 ```toml
 [mcp_servers.cairn]
 command = "/path/to/cairn/backend/.venv/bin/python"
-args = ["/path/to/cairn/backend/app/mcp_server.py"]
+args = ["/path/to/cairn/backend/run_mcp.py"]
 ```
 
 ### Claude Desktop（手順のみ・未検証）
@@ -164,7 +179,7 @@ Settings → Developer → Edit Config で `claude_desktop_config.json` に追�
   "mcpServers": {
     "cairn": {
       "command": "/path/to/cairn/backend/.venv/bin/python",
-      "args": ["/path/to/cairn/backend/app/mcp_server.py"]
+      "args": ["/path/to/cairn/backend/run_mcp.py"]
     }
   }
 }

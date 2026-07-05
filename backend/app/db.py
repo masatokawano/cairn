@@ -2596,6 +2596,84 @@ def list_conversations(
     return [{**dict(r), "meta": json.loads(r["meta"])} for r in rows]
 
 
+def get_item(source: str, external_id: str) -> dict | None:
+    """One item from the registry by its (source, external_id) key (M5).
+
+    Read-only. Returns the items row with meta parsed, url passed through the
+    same http(s) safety gate the search rows use, an assembled `body`
+    (the redacted, deterministic index text for external kinds — reused from
+    the chunker's source so callers get the same text that was indexed), and
+    `conversation_id` when kind='conversation' (external_id == source_id) so
+    the caller can fetch the full thread via get_conversation(). Returns None
+    if no such item exists."""
+    conn = connect()
+    row = conn.execute(
+        "SELECT id, kind, source, external_id, title, url, url_norm, doi,"
+        " created_at, updated_at, meta FROM items WHERE source=? AND external_id=?",
+        (source, external_id),
+    ).fetchone()
+    if row is None:
+        return None
+    meta = json.loads(row["meta"] or "{}")
+    out = {
+        "item_id": row["id"],
+        "kind": row["kind"],
+        "source": row["source"],
+        "external_id": row["external_id"],
+        "title": row["title"],
+        "url": _safe_external_url(row["url"]),
+        "doi": row["doi"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "meta": meta,
+        "conversation_id": None,
+        "body": None,
+    }
+    if row["kind"] == "conversation":
+        conv = conn.execute(
+            "SELECT id FROM conversations WHERE source=? AND source_id=?",
+            (source, external_id),
+        ).fetchone()
+        out["conversation_id"] = conv["id"] if conv else None
+    else:
+        out["body"] = _item_index_text(row["title"], meta)
+    return out
+
+
+def linked_items(item_id: int) -> list[dict]:
+    """Items strongly linked to *item_id* via item_links (url/doi/github, M5).
+
+    Read-only helper for build_context_pack: follows the persisted strong-match
+    edges (D5 — same-source similarity is never stored, only these exact
+    matches). Returns the neighbour items (meta parsed, url gated) each tagged
+    with `link_via`. Undirected: matches rows where item_id is on either side."""
+    conn = connect()
+    rows = conn.execute(
+        """SELECT i.id, i.kind, i.source, i.external_id, i.title, i.url,
+                  i.doi, i.created_at, i.updated_at, i.meta, l.link_via
+           FROM item_links l
+           JOIN items i ON i.id = CASE WHEN l.a_id=? THEN l.b_id ELSE l.a_id END
+           WHERE l.a_id=? OR l.b_id=?""",
+        (item_id, item_id, item_id),
+    ).fetchall()
+    return [
+        {
+            "item_id": r["id"],
+            "kind": r["kind"],
+            "source": r["source"],
+            "external_id": r["external_id"],
+            "title": r["title"],
+            "url": _safe_external_url(r["url"]),
+            "doi": r["doi"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "meta": json.loads(r["meta"] or "{}"),
+            "link_via": r["link_via"],
+        }
+        for r in rows
+    ]
+
+
 def stats() -> dict:
     conn = connect()
     rows = conn.execute(
