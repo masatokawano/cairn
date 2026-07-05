@@ -17,6 +17,7 @@ break out of its list entry, forge frontmatter, or inject headings.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from .. import db
@@ -34,9 +35,46 @@ EXCLUDED_EXACT_TITLES = {"New chat", "User Request: Help Needed", "Untitled"}
 MIN_MESSAGES = 4
 
 
+# Inline-markdown metacharacters neutralised in untrusted text (§6.1 /
+# Codex M3 review should #2). Newline collapse alone stops frontmatter and
+# heading forgery but not same-line constructs: [click](url), ![img](url),
+# `code`, emphasis. '#' is only structural at line start, which the collapse
+# already prevents.
+_MD_META = re.compile(r"([\\`*_\[\]()<>!|])")
+
+
 def _esc(value: str | None) -> str:
-    """Collapse untrusted text to one line for safe markdown embedding."""
-    return " ".join((value or "").split())
+    """Untrusted text → one line, inline markdown metacharacters escaped.
+    For prose positions (headings, list values)."""
+    collapsed = " ".join((value or "").split())
+    return _MD_META.sub(r"\\\1", collapsed)
+
+
+def _esc_code(value: str | None) -> str:
+    """Untrusted text → one line, safe inside a `code span` (backslash
+    escapes don't work there, so backticks are replaced instead)."""
+    return " ".join((value or "").split()).replace("`", "'")
+
+
+def _url(value: str | None) -> str | None:
+    """Untrusted URL → autolink-safe form, or None to omit the line.
+    <...> wrapping stops inline-markdown parsing; '<'/'>' are invalid in
+    URLs and dropped so the wrapper can't be closed early. Non-http(s)
+    schemes are omitted entirely (same policy as db._safe_external_url)."""
+    collapsed = "".join((value or "").split())
+    collapsed = collapsed.replace("<", "").replace(">", "")
+    if not re.match(r"^https?://", collapsed, re.IGNORECASE):
+        return None
+    return f"<{collapsed}>"
+
+
+def _wikilink(rel: str) -> str:
+    """Vault-relative path → [[wikilink]] text. Obsidian link syntax cannot
+    escape ']]' / '|' / '#', so paths containing them fall back to escaped
+    plain text (the link would be broken anyway)."""
+    if any(ch in rel for ch in "[]|#"):
+        return _esc(rel)
+    return f"[[{rel}]]"
 
 
 def _now_local(now: datetime | None) -> datetime:
@@ -85,10 +123,11 @@ def karakeep_to_review(now: datetime | None = None) -> str:
             f"## {_esc(r['title']) or '無題'}",
             "",
         ])
-        if r["url"]:
-            lines.append(f"- URL: {_esc(r['url'])}")
+        url = _url(r["url"])
+        if url:
+            lines.append(f"- URL: {url}")
         lines.extend([
-            f"- Karakeep ID: `{_esc(r['external_id'])}`",
+            f"- Karakeep ID: `{_esc_code(r['external_id'])}`",
             f"- 保存日時: {_esc(r['created_at'])}",
             f"- タグ: {_esc(', '.join(meta.get('tags') or []))}",
             "",
@@ -147,13 +186,13 @@ def cairn_recent(now: datetime | None = None) -> str:
         lines.extend([
             f"## {_esc(r['title']) or '無題'}",
             "",
-            f"- Source: `{_esc(r['source'])}`",
+            f"- Source: `{_esc_code(r['source'])}`",
             f"- Cairn ID: `{r['id']}`",
             f"- 更新日時: {_esc(r['updated_at'])}",
             f"- メッセージ数: {r['message_count']}",
         ])
         if cwd:
-            lines.append(f"- Project: `{_esc(cwd)}`")
+            lines.append(f"- Project: `{_esc_code(cwd)}`")
         lines.extend([
             "",
             "- [ ] 内容を確認",
@@ -202,16 +241,17 @@ def zotero_recent(now: datetime | None = None) -> str:
         lines.extend([
             f"## {_esc(r['title']) or '無題'}",
             "",
-            f"- 種別: `{_esc(meta.get('itemType')) or 'unknown'}`",
-            f"- Zotero Key: `{_esc(r['external_id'])}`",
+            f"- 種別: `{_esc_code(meta.get('itemType')) or 'unknown'}`",
+            f"- Zotero Key: `{_esc_code(r['external_id'])}`",
             f"- 更新日時: {_esc(r['updated_at'])}",
         ])
         if creators:
             lines.append(f"- 著者: {_esc(creators)}")
         if r["doi"]:
-            lines.append(f"- DOI: `{_esc(r['doi'])}`")
-        if r["url"]:
-            lines.append(f"- URL: {_esc(r['url'])}")
+            lines.append(f"- DOI: `{_esc_code(r['doi'])}`")
+        url = _url(r["url"])
+        if url:
+            lines.append(f"- URL: {url}")
         if tags:
             lines.append(f"- タグ: {_esc(tags)}")
         lines.extend([
@@ -272,7 +312,8 @@ def obsidian_context(now: datetime | None = None) -> str:
         # external_id is the vault-relative path; strip .md for the wikilink
         rel = row["external_id"]
         rel = rel[:-3] if rel.endswith(".md") else rel
-        return f"- [[{_esc(rel)}]] — 更新 {ts.astimezone():%Y-%m-%d %H:%M}"
+        rel = " ".join(rel.split())  # collapse first; _wikilink handles the rest
+        return f"- {_wikilink(rel)} — 更新 {ts.astimezone():%Y-%m-%d %H:%M}"
 
     if themes:
         lines.extend(link_line(r, ts) for r, ts in themes)

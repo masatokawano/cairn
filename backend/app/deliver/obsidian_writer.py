@@ -19,9 +19,11 @@ filename is the attack surface. Defenses, in depth:
   1. The filename must be a bare, safe name — no path separators, no NUL,
      not "." / "..", no leading dot, and it must end in ".md". This alone
      makes "../" traversal and absolute paths impossible.
-  2. After building the target, the real (symlink-resolved) parent directory
-     must equal the real allowlisted base directory. This catches a
-     symlinked directory component that would otherwise escape the vault.
+  2. Before creating the allowlisted base directory, the deepest existing
+     ancestor must resolve to within the vault — so a symlinked directory
+     component (e.g. an ``External Brain`` link pointing outside) is rejected
+     BEFORE any directory is materialised at the symlink's target. After
+     creation the resolved base is re-checked for containment.
   3. We refuse to write *through* a symlink at the target itself (a planted
      symlink in 90 Auto could otherwise redirect an overwrite out of the
      vault). New-only destinations additionally refuse if anything already
@@ -79,6 +81,33 @@ def _validate_filename(filename: str) -> None:
         raise ObsidianWriteError(f"filename must end in .md: {filename!r}")
 
 
+def _safe_mkdir_within(root: Path, target_dir: Path) -> Path:
+    """Create ``target_dir`` (and any missing parents) without ever following
+    a symlink out of ``root``. Returns target_dir's resolved real path.
+
+    Guards a pre-mkdir escape (Codex M3 review blocker): a plain
+    ``mkdir(parents=True)`` follows a symlinked ancestor and materialises
+    directories at the symlink's target — outside the vault — *before* any
+    containment check can reject the write. So we resolve the deepest
+    EXISTING ancestor and require it to sit within ``root`` before creating
+    anything. resolve() follows every symlink in the path, so a symlinked
+    intermediate (e.g. an ``External Brain`` link pointing outside) makes the
+    existing ancestor resolve outside ``root`` and is caught here with no
+    directory created. The missing tail we then create is built only from
+    trusted components (the constant subdir + config brain dir), never from
+    the untrusted filename."""
+    existing = target_dir
+    while not existing.exists():
+        existing = existing.parent
+    if not existing.resolve(strict=True).is_relative_to(root):
+        raise ObsidianWriteError(f"destination escapes the vault: {target_dir}")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    real = target_dir.resolve(strict=True)
+    if not real.is_relative_to(root):
+        raise ObsidianWriteError(f"destination escapes the vault: {target_dir}")
+    return real
+
+
 def _resolve_target(category: str, filename: str) -> tuple[Path, Path]:
     """Validate inputs and return (target_path, base_real_dir). Creates the
     allowlisted base directory if missing. Raises ObsidianWriteError on any
@@ -93,20 +122,11 @@ def _resolve_target(category: str, filename: str) -> tuple[Path, Path]:
     root = _vault_root()
     brain_dir = os.environ.get("CAIRN_EXTERNAL_BRAIN_DIR", "External Brain")
     base = root / brain_dir / subdir
-    base.mkdir(parents=True, exist_ok=True)
-    base_real = base.resolve(strict=True)
-
-    # The allowlisted base must itself stay within the vault (guards a
-    # symlinked External Brain / subdir pointing outside).
-    if not base_real.is_relative_to(root):
-        raise ObsidianWriteError(f"destination escapes the vault: {base_real}")
+    # Creates the base only after verifying no symlinked ancestor escapes the
+    # vault — the containment check happens BEFORE any directory is made.
+    base_real = _safe_mkdir_within(root, base)
 
     target = base / filename
-    # filename has no separators, so target.parent is base; resolving it
-    # catches a symlinked component between vault root and base.
-    if target.parent.resolve(strict=True) != base_real:
-        raise ObsidianWriteError(f"destination escapes the vault: {target}")
-
     if target.is_symlink():
         raise ObsidianWriteError(f"refusing to write through a symlink: {target}")
     if target.exists():

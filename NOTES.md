@@ -218,6 +218,29 @@
   fresh/migrated の schema 乖離が必要なため見送り。kind を UPDATE する変更を
   入れる際はトリガも `UPDATE OF text, kind` + new.kind 条件へ差し替えること。
 
+## Obsidian 書き込み（M3 / `deliver/obsidian_writer.py`）
+
+- **`mkdir(parents=True)` は封じ込め検証の「前」に副作用を起こす**。allowlist の
+  ベースディレクトリを作る前に、必ず「最深の既存祖先」を `resolve()` して Vault 内か
+  検証すること（`_safe_mkdir_within`）。順序を逆にすると、中間コンポーネント
+  （例: `External Brain`）が Vault 外への symlink で subdir が未作成のとき、書き込み
+  自体は拒否されても **拒否前に symlink 先へディレクトリを作ってしまう**
+  （Codex M3 レビュー blocker）。`resolve()` は経路上の全 symlink をたどるので、
+  最深の既存祖先が Vault 外に解決されれば escape を mkdir 前に捕捉できる。
+- 破損 symlink（存在しないターゲットへのリンク）が中間にある場合、Python の
+  `Path.mkdir(parents=True, exist_ok=True)` は `is_dir()` が False になり
+  FileExistsError で止まる → Vault 外に作らず fail-safe。ObsidianWriteError では
+  ないが封じ込めは保たれる。
+
+## auto_lists の markdown エスケープ（M3 / `deliver/auto_lists.py`）
+
+- 改行の畳み込みだけでは **同一行の markdown 構文注入**（`[x](url)` / `![x](url)` /
+  `` `code` `` / `**強調**`）を防げない（Codex M3 レビュー should）。外部由来テキストは
+  位置別にエスケープする: 散文位置は `_esc`（メタ文字をバックスラッシュ escape）、
+  code span 内は `_esc_code`（バッククォート置換。span 内は `\` が効かない）、
+  URL は `_url`（`<autolink>` ラップ + `<`/`>` 除去 + 非 http(s) は行ごと省略）、
+  wikilink は `_wikilink`（`[]|#` を含むパスはプレーンテキストに fallback）。
+
 ## スキーマ migration（P1-A / `db.py`）
 
 - バージョンは `PRAGMA user_version`。2つの仕組みを併用する:

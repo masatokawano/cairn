@@ -122,6 +122,54 @@ def test_untrusted_title_cannot_break_structure(db):
     assert "## 改行注入 --- source: attacker # 偽見出し" in md
 
 
+def test_inline_markdown_injection_escaped(db):
+    """Codex M3 review should #2: same-line markdown constructs in external
+    titles (links, images, code, emphasis) must be neutralised."""
+    evil = "click [here](https://evil/x) ![img](https://evil/i) `rm -rf` **b**"
+    add_item(db, "karakeep", "bookmark", "bm-md", title=evil,
+             url="https://example.com/x", tags=["to-review"])
+    from app.deliver import auto_lists
+    md = auto_lists.karakeep_to_review(NOW)
+    assert "[here](" not in md          # link syntax broken by escapes
+    assert "![img](" not in md          # image syntax broken
+    assert "`rm -rf`" not in md         # code span broken
+    assert "**b**" not in md            # emphasis broken
+    assert r"\[here\]" in md            # escaped forms present instead
+
+
+def test_code_span_breakout_neutralised(db):
+    """A backtick in a value we wrap in `...` must not close the span."""
+    add_item(db, "karakeep", "bookmark", "bm-`x`-tick", title="t",
+             url="https://example.com/x", tags=["to-review"])
+    from app.deliver import auto_lists
+    md = auto_lists.karakeep_to_review(NOW)
+    assert "`bm-'x'-tick`" in md
+    assert "``" not in md
+
+
+def test_url_injection_wrapped_or_dropped(db):
+    """URLs render as <autolink>; a URL smuggling markdown cannot escape the
+    wrapper, and non-http(s) schemes are omitted entirely."""
+    add_item(db, "karakeep", "bookmark", "bm-u1", title="a",
+             url="https://example.com/) ![x](https://evil/img", tags=["to-review"])
+    add_item(db, "karakeep", "bookmark", "bm-u2", title="b",
+             url="javascript:alert(1)", tags=["to-review"])
+    from app.deliver import auto_lists
+    md = auto_lists.karakeep_to_review(NOW)
+    assert "- URL: <https://example.com/)![x](https://evil/img>" in md
+    assert "javascript:" not in md      # dropped, not printed
+
+
+def test_wikilink_breakout_falls_back_to_text(db):
+    add_item(db, "obsidian", "note", "External Brain/10 Themes/x]]注入[[y.md",
+             title="x]]注入[[y", updated="2026-07-01T00:00:00Z",
+             folder="10 Themes", text="本文")
+    from app.deliver import auto_lists
+    md = auto_lists.obsidian_context(NOW)
+    assert "]]注入[[" not in md          # raw breakout sequence absent
+    assert "注入" in md                   # entry still listed (escaped text)
+
+
 def test_generate_all_returns_four_lists(db):
     from app.deliver import auto_lists
     out = auto_lists.generate_all(NOW)

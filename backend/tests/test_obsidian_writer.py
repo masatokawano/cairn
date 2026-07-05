@@ -133,6 +133,43 @@ def test_symlinked_base_dir_escaping_vault_rejected(vault, tmp_path):
     assert not (outside / "x.md").exists()
 
 
+def test_symlinked_intermediate_with_missing_subdir_creates_nothing(vault, tmp_path):
+    """Codex M3 review blocker: if a middle component (External Brain) is a
+    symlink out of the vault AND the allowlisted subdir does not yet exist,
+    the write must be refused WITHOUT creating the subdir at the symlink's
+    target (the pre-mkdir escape)."""
+    root, w = vault
+    outside = tmp_path / "outside_brain"
+    outside.mkdir()
+    # replace the whole External Brain dir with a symlink pointing outside,
+    # and ensure 90 Auto does not exist under the target yet
+    import shutil
+    shutil.rmtree(eb(root))
+    (root / "External Brain").symlink_to(outside, target_is_directory=True)
+    assert not (outside / "90 Auto").exists()
+
+    with pytest.raises(w.ObsidianWriteError, match="escapes the vault"):
+        w.write("auto", "x.md", "escaped")
+
+    # the crucial assertion: nothing was created at the symlink target
+    assert not (outside / "90 Auto").exists()
+    assert list(outside.iterdir()) == []
+
+
+def test_symlinked_missing_subdir_itself_creates_nothing(vault, tmp_path):
+    """A subdir-level symlink (90 Auto -> outside) that does not yet contain
+    the expected tree must also be rejected without side effects."""
+    root, w = vault
+    outside = tmp_path / "outside_auto"
+    outside.mkdir()
+    import shutil
+    shutil.rmtree(eb(root) / "90 Auto")
+    (eb(root) / "90 Auto").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(w.ObsidianWriteError, match="escapes the vault"):
+        w.write("auto", "x.md", "escaped")
+    assert list(outside.iterdir()) == []
+
+
 def test_symlinked_target_not_followed(vault, tmp_path):
     root, w = vault
     outside = tmp_path / "secret.md"
