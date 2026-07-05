@@ -4,7 +4,8 @@
   vault, gated by an allowlist + path validation.
 - `auto_lists.py` (M3) — generates the 90 Auto index markdown (content only,
   no I/O).
-- `weekly_review.py` (M4) — weekly review renderer (not yet present).
+- `weekly_review.py` (M4) — weekly review generation (§5.4: activity +
+  related-from-the-past + AI draft), written through obsidian_writer.
 
 Invariant 2 (AGENTS.md): Obsidian writes are restricted to exactly three
 paths — `90 Auto/` (overwrite), `40 Reviews/Weekly/` (new only), and

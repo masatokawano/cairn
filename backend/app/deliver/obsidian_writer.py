@@ -139,6 +139,32 @@ def _resolve_target(category: str, filename: str) -> tuple[Path, Path]:
     return target, base_real
 
 
+def target_exists(category: str, filename: str) -> bool:
+    """True when something already occupies the allowlisted target path.
+
+    Read-only variant of the write() validation for callers that must skip
+    expensive generation when a new-only destination is taken (M4 weekly
+    review: 既存週は上書きしない). Unlike _resolve_target it creates no
+    directories; a missing base directory simply means "does not exist".
+    Same containment rule: a base resolving outside the vault is an error,
+    not a False."""
+    if category not in ALLOWLIST:
+        raise ObsidianWriteError(
+            f"unknown category {category!r}; allowed: {sorted(ALLOWLIST)}"
+        )
+    _validate_filename(filename)
+    subdir, _ = ALLOWLIST[category]
+    root = _vault_root()
+    brain_dir = os.environ.get("CAIRN_EXTERNAL_BRAIN_DIR", "External Brain")
+    base = root / brain_dir / subdir
+    if not base.exists():
+        return False
+    if not base.resolve(strict=True).is_relative_to(root):
+        raise ObsidianWriteError(f"destination escapes the vault: {base}")
+    target = base / filename
+    return target.is_symlink() or target.exists()
+
+
 def write(category: str, filename: str, content: str) -> Path:
     """Write ``content`` to ``filename`` in the allowlisted ``category``
     directory. Returns the written path. Raises ObsidianWriteError if the

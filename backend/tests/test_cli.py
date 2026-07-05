@@ -1,9 +1,11 @@
 """Tests for the `cairn` CLI (backend/app/cli.py).
 
-Wired: `sync conversations` (M0) and `sync karakeep` / `sync zotero` (M1,
-tested here with the connector monkeypatched — connector internals are
-covered in test_connector_*.py). Remaining subcommands must exit 1 with a
-milestone-tagged message. `--help` must exit 0.
+All command groups are wired: `sync conversations` (M0), `sync karakeep` /
+`sync zotero` (M1, tested here with the connector monkeypatched — connector
+internals are covered in test_connector_*.py), `index rebuild` (M2),
+`sync obsidian` / `sync all` (M3), `review weekly` (M4 — generation logic
+lives in test_weekly_review.py; here only the CLI wiring and exit codes).
+`--help` must exit 0.
 """
 import importlib
 
@@ -38,16 +40,49 @@ def test_help_exits_zero(cli):
     assert "index" in result.stdout
 
 
-@pytest.mark.parametrize("args,milestone", [
-    (["review", "weekly"], "M4"),
-])
-def test_stub_subcommands_exit_one(cli, args, milestone):
+def test_review_weekly_wired(cli, monkeypatch):
+    import json
+    from app.deliver import weekly_review
+    seen = {}
+
+    def fake_run(*, week=None):
+        seen["week"] = week
+        return {"status": "created", "week": week or "2026-W27"}
+
+    monkeypatch.setattr(weekly_review, "run", fake_run)
     runner = CliRunner()
-    result = runner.invoke(cli.app, args)
-    assert result.exit_code == 1, f"{' '.join(args)} should exit 1, got {result.exit_code}"
-    # stub messages go to stderr; CliRunner mixes streams by default.
+    result = runner.invoke(cli.app, ["review", "weekly", "--week", "2099-W01"])
+    assert result.exit_code == 0, result.output
+    assert seen["week"] == "2099-W01"
+    assert json.loads(result.stdout)["status"] == "created"
+
+
+def test_review_weekly_exists_exits_zero(cli, monkeypatch):
+    """An already-written week is a success (launchd re-runs at login)."""
+    import json
+    from app.deliver import weekly_review
+    monkeypatch.setattr(
+        weekly_review, "run",
+        lambda *, week=None: {"status": "exists", "week": "2026-W27"},
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["review", "weekly"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["status"] == "exists"
+
+
+def test_review_weekly_failure_exits_one(cli, monkeypatch):
+    from app.deliver import weekly_review
+
+    def boom(*, week=None):
+        raise ValueError("invalid --week (expected YYYY-Www): 'x'")
+
+    monkeypatch.setattr(weekly_review, "run", boom)
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["review", "weekly", "--week", "x"])
+    assert result.exit_code == 1
     combined = result.stdout + (result.stderr if result.stderr_bytes is not None else "")
-    assert milestone in combined
+    assert "review weekly failed" in combined
 
 
 @pytest.mark.parametrize("name", ["karakeep", "zotero"])

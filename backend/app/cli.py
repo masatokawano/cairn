@@ -1,10 +1,8 @@
 """`cairn` CLI (DESIGN.md §5.7).
 
-Three top-level command groups: `sync`, `review`, `index`. Wired so far:
-`sync conversations` (M0, Phase-1 cli_sync.scan_once) and
-`sync karakeep` / `sync zotero` (M1 connectors). The remaining subcommands
-print a milestone-specific "not yet implemented" message and exit 1 so
-scripting mistakes fail loud rather than pretending to succeed.
+Three top-level command groups, all wired: `sync` (M0 conversations, M1
+karakeep/zotero, M3 obsidian + 90 Auto lists), `index rebuild` (M2), and
+`review weekly` (M4).
 
 Entry point: `backend/bin/cairn` (a shell wrapper that sets PYTHONPATH and
 execs `python -m app.cli`). Editable install / pyproject.toml is deferred
@@ -32,12 +30,6 @@ index_app = typer.Typer(no_args_is_help=True, help="Derived-data rebuilds (M2/M6
 app.add_typer(sync_app, name="sync")
 app.add_typer(review_app, name="review")
 app.add_typer(index_app, name="index")
-
-
-def _todo(where: str, milestone: str) -> None:
-    """Print a milestone note and exit 1 so unimplemented paths fail loud."""
-    typer.echo(f"{where}: not implemented yet — landing in {milestone}.", err=True)
-    raise typer.Exit(code=1)
 
 
 @sync_app.command("conversations")
@@ -137,8 +129,19 @@ def review_weekly(
         None, "--week", help="ISO week (e.g. 2099-W01). Defaults to the current week.",
     ),
 ) -> None:
-    """(Stub) Generate the weekly review — implemented in M4."""
-    _todo("review weekly", "M4")
+    """Generate the weekly review into 40 Reviews/Weekly (M4, DESIGN.md §5.4).
+
+    Exit 0 both on creation and when the week's file already exists (the
+    launchd login trigger re-runs this; an existing week must stay quiet).
+    A failed AI draft is reported in the JSON but does not fail the run (S4).
+    """
+    from .deliver import weekly_review
+    try:
+        out = weekly_review.run(week=week)
+    except Exception as exc:
+        typer.echo(f"review weekly failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
 
 
 @index_app.command("rebuild")

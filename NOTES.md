@@ -241,6 +241,41 @@
   URL は `_url`（`<autolink>` ラップ + `<`/`>` 除去 + 非 http(s) は行ごと省略）、
   wikilink は `_wikilink`（`[]|#` を含むパスはプレーンテキストに fallback）。
 
+## 週次レビュー v2（M4 / `recall/` + `deliver/weekly_review.py`）
+
+- **陳腐化警告（§5.4）の鮮度は import_runs だけでは測れない**。`/api/import`
+  経由のアップロードは `import_runs.source='upload'` で記録され、パーサー由来の
+  source 名（chatgpt/claude/gemini）では入らない。import_runs のみを見ると手動
+  エクスポート系が常に「一度も取り込まれていません」になる。`stale_exports` は
+  import_runs と **`conversations.updated_at` の新しい方**を採用する（警告の実質
+  ＝「その source の最新知識の古さ」も後者が正しく測る）。
+- **日本語タイトルは空白がないので、タイトル丸ごとの FTS フレーズはほぼ同一文
+  にしか当たらない**。related() の keyword アームで再浮上を効かせるには、タイトル
+  を内容語に分割してクエリ化する（`_content_terms`：区切り・句読点・主要助詞で
+  分割）。分割語を related() の複数クエリ RRF に流すと OR + rank fusion になる。
+- **ASCII の短い断片（`on` / `to` / `T1`）と英語ストップワードはノイズ**。LIKE で
+  アーカイブの半分に当たり、理由行が「今週の『on』に関連」になる。`_content_terms`
+  は ASCII は3文字以上かつ非ストップワードのみ採用（CJK は2文字で意味を持つので
+  そのまま）。それでも会話タイトルが文の断片（「完了しました」等）だと理由行が
+  やや雑になるが、これは実データのタイトル品質の問題で M6 のチューニング範囲。
+- related() は会話ノイズタイトル（security-review boilerplate / New chat 等）も
+  除外する。ただし検索行にはメッセージ数がないので `_is_review_candidate` の
+  件数条件は使えず、**タイトル規則のみ**の `_is_noise_conversation` を別に持つ。
+- `weekly_review.run()` は既存週があれば `status="exists"` で **何も書かず exit 0**
+  （launchd のログイン時トリガが日曜の生成後に無音で再実行されるため）。
+  obsidian_writer に read-only の `target_exists()` を追加（`_resolve_target` と違い
+  ディレクトリを作らないが、封じ込め検証は同じ = Vault 外 base はエラー）。
+- **草案は LLMProvider の structured JSON 契約を使う**（Phase 3 の `complete_structured`
+  ＋ schema）。ollama 停止・モデル無し・非 JSON はすべて例外に集約され、run() が
+  握って空草案＋失敗注記に縮退する（S4）。テストは `FixtureProvider(responses=[...])`
+  で草案を注入、`fail_first=99` で失敗経路、実 `OllamaProvider` を死にポート
+  （`CAIRN_OLLAMA_HOST=http://127.0.0.1:1`）に向けて到達不能を再現。
+- 草案は外部テキスト由来なので **untrusted 扱い**：`_esc` で markdown エスケープし、
+  provenance ラベル `<!-- generated_by: cairn/<model>/prompt_v1 -->` を必ず付す。
+  LLM へ渡す資料は `<<<資料ここから>>>`/`<<<資料ここまで>>>` で囲み、各行は
+  `_llm_line`（区切りマーカー除去 + 長さ制限）で洗う。プロンプト改訂時は
+  `PROMPT_VERSION` を上げる。
+
 ## スキーマ migration（P1-A / `db.py`）
 
 - バージョンは `PRAGMA user_version`。2つの仕組みを併用する:
