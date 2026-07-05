@@ -185,6 +185,38 @@ Settings → Developer → Edit Config で `claude_desktop_config.json` に追�
 }
 ```
 
+## 運用（常駐と再構築）
+
+同期とレビューは launchd の2エージェントで無人運用します（DESIGN.md §5.7）:
+
+- `com.masato.cairn.sync` — 毎時 `cairn sync all`（会話 + Karakeep + Zotero +
+  Obsidian → 90 Auto 一覧）
+- `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`
+
+導入は `ops/launchd/install.sh`（plist を生成して `~/Library/LaunchAgents` へ配置。
+`launchctl bootstrap` は自分で実行。手順は同スクリプトが表示）。ログは
+`~/Library/Logs/cairn/`。
+
+**失敗通知（M6 / S4）**: エージェント経由の実行（plist が `CAIRN_NOTIFY=1` を渡す）が
+**非ゼロ終了したときだけ**、macOS 通知を出し `~/Library/Logs/cairn/failures.log` に
+1行追記します。判定は**終了コード基準**です（stderr は e5 の重みロードや HF 警告で
+恒常的に賑やかなため）。手動実行（`CAIRN_NOTIFY` なし）では通知しません。
+`cairn sync all` は1ソースでも失敗すれば exit 1、`cairn review weekly` は実エラー時のみ
+exit 1（週の既存・AI草案失敗は成功扱い）。
+
+**派生データの再構築**: `cairn index rebuild` は原本（conversations / items）から
+chunks・FTS・埋め込み・vec0 索引・item_links を**穴埋め方式**で作り直します（既存の
+chunk/embedding は温存。強制全再チャンクは埋め込みを CASCADE 削除して数時間かかるため
+しません）。実測（本番規模: 会話1871・メッセージ約22.7k・chunk約31.5k / 340MB, Apple
+Silicon）:
+
+- 差分なし（全 embedding 済み）: **約10秒**（FTS + vec0 31.5k + item_links の再構築のみ）
+- 埋め込みバックログ約2,900 chunk を含む初回: **約57秒**
+
+毎時の `sync all` は新規 chunk を**埋め込みまではしない**（keyword/FTS は即時に効くが、
+semantic/hybrid の再現性はバックログのぶん遅れる）。定期的に `cairn index rebuild` を
+回すと semantic 索引が追いつきます。
+
 ## シークレット除去
 
 取り込み時にメッセージ本文へ自動でシークレット除去を適用します（OpenAI / Anthropic /

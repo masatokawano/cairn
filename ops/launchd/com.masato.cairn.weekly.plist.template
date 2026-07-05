@@ -6,9 +6,9 @@
     <key>Label</key>
     <string>com.masato.cairn.weekly</string>
 
-    <!-- Sunday 18:00 `cairn review weekly` (DESIGN.md §5.7). Until M4 lands
-         the subcommand exits 1 with a milestone note — the agent can be
-         installed now and starts producing reviews the moment M4 ships. -->
+    <!-- Sunday 18:00 + login `cairn review weekly` (DESIGN.md §5.7, M4).
+         Exit 0 on creation and when the week already exists; a real error
+         exits 1 and (via CAIRN_NOTIFY below) posts a macOS notification. -->
     <key>ProgramArguments</key>
     <array>
         <string>{{BACKEND_DIR}}/bin/cairn</string>
@@ -44,6 +44,18 @@
         <string>{{OBSIDIAN_VAULT}}</string>
         <key>CAIRN_EXTERNAL_BRAIN_DIR</key>
         <string>{{EXTERNAL_BRAIN_DIR}}</string>
+        <!-- M6/S4: non-zero exit → macOS notification + failures.log entry -->
+        <key>CAIRN_NOTIFY</key>
+        <string>1</string>
+        <key>CAIRN_AGENT</key>
+        <string>weekly</string>
+        <key>CAIRN_LOG_DIR</key>
+        <string>{{LOG_DIR}}</string>
+        <!-- related() semantic uses the cached e5 weights; stay offline -->
+        <key>HF_HUB_OFFLINE</key>
+        <string>1</string>
+        <key>TRANSFORMERS_OFFLINE</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>

@@ -41,6 +41,20 @@
         <string>{{OBSIDIAN_VAULT}}</string>
         <key>CAIRN_EXTERNAL_BRAIN_DIR</key>
         <string>{{EXTERNAL_BRAIN_DIR}}</string>
+        <!-- M6/S4: non-zero exit → macOS notification + failures.log entry.
+             Keyed on exit code, so the noisy stderr below is irrelevant. -->
+        <key>CAIRN_NOTIFY</key>
+        <string>1</string>
+        <key>CAIRN_AGENT</key>
+        <string>sync</string>
+        <key>CAIRN_LOG_DIR</key>
+        <string>{{LOG_DIR}}</string>
+        <!-- e5 embedding weights are already cached locally; go offline to
+             drop the HF-Hub warnings that flood sync-error.log -->
+        <key>HF_HUB_OFFLINE</key>
+        <string>1</string>
+        <key>TRANSFORMERS_OFFLINE</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>

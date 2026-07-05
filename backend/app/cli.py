@@ -186,7 +186,22 @@ def index_rebuild() -> None:
 
 
 def main() -> None:
-    app()
+    """Run the CLI, notifying on failure when launched by an alerting agent.
+
+    Typer/Click raise ``SystemExit`` with the process exit code (0 on success,
+    1 on a command's ``typer.Exit(1)`` or an unhandled error). When this run
+    was started by a launchd agent (``CAIRN_NOTIFY`` truthy) and the code is
+    non-zero, post a macOS failure notification (M6/S4). Notification is
+    best-effort and never changes the exit code the agent sees."""
+    from . import ops
+
+    try:
+        app()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else (0 if not exc.code else 1)
+        if code and ops.should_notify():
+            ops.notify_failure(code)
+        raise
 
 
 if __name__ == "__main__":

@@ -301,6 +301,29 @@
   する（`server` は `from . import MAX_BODY_CHARS` で自 module に束ねているため、パッケージ
   `app.mcp` 側の属性を差し替えても効かない）。
 
+## 運用の通知・再構築（M6 / `app/ops.py` + launchd）
+
+- **失敗通知は終了コード基準（stderr は見ない）**。エージェントの stderr は
+  sentence-transformers の重みロードバー・HF Hub 警告で恒常的に賑やか、かつ append で
+  古い行が残る（実ログで `weekly-error.log` に M4 以前の "not implemented" が残留を確認）。
+  「stderr 非空＝失敗」だと誤検知だらけになる。`cairn sync all` は1ソース失敗で exit 1、
+  `review weekly` は実エラー時のみ exit 1（週の既存・草案失敗は成功）なので、exit code が
+  唯一の正しいシグナル。通知は `cli.main()` が `SystemExit` を捕捉し、`CAIRN_NOTIFY` 有効
+  かつ非ゼロ時のみ `ops.notify_failure`（osascript 通知 + failures.log 追記）。通知は
+  best-effort で **実 exit code を絶対に変えない**（osascript 不在・例外は握りつぶす）。
+  plist は `CAIRN_NOTIFY=1` / `CAIRN_AGENT` / `CAIRN_LOG_DIR` を渡す。手動実行では鳴らない。
+- **osascript のメッセージに外部由来テキストを入れるなら AppleScript 文字列リテラルを
+  エスケープ**（`ops._as`: `\`→`\\`、`"`→`\"`）。エラーメッセージ経由の注入を防ぐ。
+- **`sync all`（毎時）は新規 chunk を embedding まではしない**。keyword/FTS は即時だが
+  semantic/hybrid はバックログのぶん遅れる。`cairn index rebuild` が穴埋め（rechunk は
+  skip、embed は only_missing、FTS/vec0/item_links 再構築）。実測（本番 340MB / chunk
+  約31.5k / Apple Silicon）: 差分なしで**約10秒**、埋め込みバックログ約2,900 chunk 込みで
+  **約57秒**。定期 rebuild で semantic 索引が追いつく（M6 で観測。恒常自動 embed 化は
+  設計変更＝要 Decision Record 改訂なので実装しない）。
+- **plist に `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`** を入れると e5 が
+  キャッシュ済み重みだけを使い、sync-error.log の HF 警告ノイズが消える（モデルは既に
+  ローカルキャッシュ済みが前提）。
+
 ## スキーマ migration（P1-A / `db.py`）
 
 - バージョンは `PRAGMA user_version`。2つの仕組みを併用する:
