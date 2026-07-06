@@ -80,6 +80,8 @@ cd backend && .venv/bin/python -m app.admin <subcommand>
   **計画が承認されたら、その範囲内では選択肢の列挙や再確認で止まらず実装を進める**
   （不可逆操作は不変条件 8 に従い都度確認）。
 - 実装後に: 変更ファイル・実行テストと結果・未解決事項・次の推奨タスクを報告。
+- マイルストーン相当の節目の完了報告と同じセッションで、ROADMAP.md の状態表・
+  docs/backlog.md・関連 memory を実態に合わせて更新する（文書追従、orchestration.md G2③）。
 - コミットはマイルストーン接頭辞（`M1:` 等）。1 コミット 1 目的。
   自動 commit / push はユーザーが明示的に求めた場合のみ。
 - 文書と実装が食い違ったら、実装ではなくまず文書（DESIGN.md）を直す提案をする。
@@ -115,13 +117,14 @@ NOTES.md は次セッションのための永続メモリ。学んだことは�
 
 | 役者 | 既定の用途 |
 |---|---|
-| Claude Fable 5 (effort: high) | マイルストーン実装セッションの既定。長い自律実行 |
-| Claude Fable 5 (effort: xhigh) | migration 設計・chunks→items 参照化のような不可逆で難度の高い設計のみ |
-| Claude Opus 4.8 | セキュリティ関連コード（redaction / allowlist / MCP ガード）の実装・レビュー。Fable の安全分類器が過検知した場合の fallback |
+| 実装既定モデル（現在: Claude Opus 4.8） | マイルストーン級実装・長い自律実行・セキュリティ関連コード（redaction / allowlist / MCP ガード）。**orchestration.md §2 の実行規律 G1〜G6 を必ず適用** |
+| 実装既定モデル + 最高 effort / 実装前 Plan・Review | migration 設計のような不可逆で難度の高い設計（実装前に独立レビューを 1 本挟む） |
 | Claude Sonnet 5 (high) | backlog の XS/S タスク、文書更新、フロント再ビルド等の定型作業 |
 | Codex CLI | 実装とは別系統による独立レビュー（下記観点）。セカンドオピニオン |
 
-選定基準・ハンドオフ様式・レビュー往復の上限は docs/orchestration.md を参照。
+選定基準・**実行規律（旧既定モデル Fable 5 の作業スタイルを、どのモデルでも再現できる
+ゲート G1〜G6 に手順化したもの）**・ハンドオフ様式・レビュー往復の上限は
+docs/orchestration.md を参照。モデル世代交代時は表の「現在: ◯◯」のみ差し替える。
 
 ## 別エージェント / 別セッションによるレビュー観点
 
