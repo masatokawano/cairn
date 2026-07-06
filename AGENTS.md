@@ -15,7 +15,7 @@ Cairn — AI 会話アーカイブを核に、Karakeep（発見）/ Zotero（根
 ## 構成
 
 - `backend/app/parsers/` — AI 会話の取り込み（chatgpt / claude_export / gemini / claude_cli / codex_cli）
-- `backend/app/db.py` — スキーマ・migration（現行 v10）・差分インポート・検索（FTS5 trigram + hybrid/RRF）
+- `backend/app/db.py` — スキーマ・migration（現行 v12）・差分インポート・検索（FTS5 trigram + hybrid/RRF）
 - `backend/app/connectors/` — Karakeep / Zotero / Obsidian の read-only クライアント（M1, M3）
 - `backend/app/core/urlnorm.py` — URL/DOI 正規化（M1、テスト厚め）
 - `backend/app/recall/` — related() / weekly digest（M4）
@@ -24,7 +24,6 @@ Cairn — AI 会話アーカイブを核に、Karakeep（発見）/ Zotero（根
 - `backend/app/extraction/` — Phase 3 抽出パイプライン。**凍結中**（DESIGN.md D2 注記）
 - `backend/app/admin.py` — 既存管理 CLI（redact / backup / integrity 等）。温存、M6 で統合検討
 - `frontend/` — Vite + React + TypeScript
-- `legacy/brain-sync/` — 旧 brain-sync（参照専用・修繕禁止・M3 で削除）
 - `ops/launchd/` — plist テンプレート（M3 で `com.masato.cairn.*` 2 本に集約）
 
 ## 不変条件（違反する変更を提案・実装しない）
@@ -44,7 +43,7 @@ Cairn — AI 会話アーカイブを核に、Karakeep（発見）/ Zotero（根
 6. **DESIGN.md §8 の非目標を再提案・再実装しない**（assertion 事前抽出の再開、関係タイプ自動分類、
    ランキング学習、レビュー繰り越し、原本への書き込み、原本全文の Obsidian 複製 等）。
    必要になったら実装ではなく Decision Record の改訂を提案する。
-7. `legacy/brain-sync/` は参照専用。修繕・拡張しない。
+7. 旧 brain-sync は M3 で廃止済み（`legacy/brain-sync/` は削除、履歴は git に残存）。復活・再導入しない。
 8. **不可逆操作は毎回明示の承認を得る**: migration の本番 DB への適用、ファイル/テーブル削除、
    launchd の load/unload、`git push`、タグ操作。承認済み計画の中に含まれていても、実行直前に
    対象を示して確認する。それ以外の可逆操作（コード編集・テスト実行・ローカル commit の準備）は
