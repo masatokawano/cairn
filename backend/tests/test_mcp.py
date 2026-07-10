@@ -102,6 +102,9 @@ def test_search_all_snippets_fenced_and_capped(setup):
     assert h["snippet"].endswith(mcpkg.DATA_CLOSE)
     body = h["snippet"][len(mcpkg.DATA_OPEN):-len(mcpkg.DATA_CLOSE)]
     assert len(body) <= mcpkg.MAX_SNIPPET + 2
+    # titles are external text too — fenced like snippets (§6.1)
+    assert h["title"].startswith(mcpkg.DATA_OPEN)
+    assert h["title"].endswith(mcpkg.DATA_CLOSE)
 
 
 def test_search_all_kind_and_source_filters(setup):
@@ -141,6 +144,7 @@ def test_get_item_conversation_returns_full_body(setup, monkeypatch):
     assert r["source"] == "claude_cli" and r["external_id"] == "auth"
     assert r["total_messages"] == 2
     assert all(m["text"].startswith(mcpkg.DATA_OPEN) for m in r["messages"])
+    assert r["title"].startswith(mcpkg.DATA_OPEN)  # conversation title fenced
 
 
 def test_get_item_conversation_paginates_long_thread(setup, monkeypatch):
@@ -171,9 +175,23 @@ def test_get_item_external_returns_meta_and_body(setup):
     from app import mcp as mcpkg
     r = server.get_item(source="zotero", external_id="ref-auth")
     assert r["kind"] == "reference" and r["source"] == "zotero"
-    assert r["meta"]["creators"] == ["Y. Ando"]
+    assert r["title"].startswith(mcpkg.DATA_OPEN)
     assert r["body"].startswith(mcpkg.DATA_OPEN)
     assert "認証設計" in r["body"]
+    # free-text meta (abstract/creators …) is inside the fenced body, not
+    # returned as bare structured fields (§6.2 構造的分離)
+    assert "Y. Ando" in r["body"]
+    assert "creators" not in r["meta"] and "abstract" not in r["meta"]
+
+
+def test_get_item_meta_is_whitelist_projected(setup):
+    """Karakeep description/note/tags must never reach the model unfenced via
+    meta — only machine-ish whitelist fields survive the projection."""
+    server, *_ = setup
+    r = server.get_item(source="karakeep", external_id="bm-oauth")
+    assert "description" not in r["meta"] and "tags" not in r["meta"]
+    assert set(r["meta"]) <= set(server._META_WHITELIST)
+    assert "oauth authorization framework" in r["body"]  # still available, fenced
 
 
 def test_get_item_not_found_and_bad_source(setup):
