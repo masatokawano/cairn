@@ -253,8 +253,8 @@ CREATE TABLE sync_state (
 
 個別:
 
-- **karakeep.py**: 全ブックマークを items(kind='bookmark') へ。タグは meta に。`to-review` タグは週次レビューの対象抽出に使う。
-- **zotero.py**: 書誌のみ items(kind='reference') へ。DOI を items.doi に正規化格納。Zotero の library version をカーソルに使う。
+- **karakeep.py**: 全ブックマークを items(kind='bookmark') へ。タグは meta に。`to-review` タグは週次レビューの対象抽出に使う。API に modified-since がないため増分は createdAt カーソル。古いブックマークの編集・削除を収束させるため、24時間ごとに full sweep へ自動昇格し、full sweep が完全成功（非空 listing）したときのみ上流削除を prune する（v1.2）。
+- **zotero.py**: 書誌のみ items(kind='reference') へ。DOI を items.doi に正規化格納。Zotero の library version をカーソルに使う（編集は since で拾える）。削除の反映は完全 listing（初回 / --full）成功時の prune のみ（v1.2）。
 - **obsidian.py**: Vault の対象ディレクトリ（§4）を走査し items(kind='note') へ。ファイルの mtime + hash で差分検出。読み取りのみ。
 
 ### 5.2 core/urlnorm.py（重要・テスト厚め）
@@ -456,6 +456,18 @@ CREATE TABLE sync_state (
 ---
 
 ## 11. 改訂記録
+
+### v1.2（2026-07-10）
+
+外部レビュー（GitHub 最新状態レビュー 2026-07-10）の第1段階修正を反映。アーキテクチャは不変。
+
+- §5.1 karakeep: 増分同期（createdAt カーソル）に加え、24時間ごとの full sweep 自動昇格と
+  full 成功時の上流削除 prune を明記（指摘 3.2 / 3.4）
+- §5.1 zotero: 完全 listing（初回 / --full）成功時の prune を明記（指摘 3.4）
+- §5.7 weekly: 対象週を「直近に締まった週」（締め＝日曜18:00 ローカル）と定義。
+  ログイン時（RunAtLoad）実行は取りこぼした週の補完のみ（指摘 3.1）
+- D12: CLI 会話ログ同期 2 経路（サーバ内60秒 + launchd 毎時）のプロセス間 flock 直列化を新設（指摘 3.5）
+- MCP: search_all / get_item の title もフェンス、get_item の meta はホワイトリスト投影に統一（指摘 3.3、§6.1/§6.2 の適合修正）
 
 ### v1.1（2026-07-02）
 

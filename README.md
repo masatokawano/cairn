@@ -1,8 +1,11 @@
 # Cairn
 
-AI会話アーカイブ・横断検索アプリ。ChatGPT / Claude / Gemini のエクスポートと、
-claude CLI / codex CLI のローカルログを1つのSQLiteに取り込み、ブラウザから
-キーワードで横断検索してフルスレッドを閲覧できる。**すべてローカル完結**。
+AI 会話アーカイブを核にした個人用外部脳プラットフォーム。ChatGPT / Claude / Gemini の
+エクスポートと claude CLI / codex CLI のローカルログに加え、Karakeep（発見）/
+Zotero（根拠）/ Obsidian（理解）を read-only で1つの SQLite に索引し、キーワード・
+意味・ハイブリッドで横断検索できる。週次レビューと過去情報の再浮上を Obsidian へ
+書き出し、MCP サーバ経由で AI セッションに過去の知識を供給する。
+**すべてローカル完結**。設計の正典は [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## セットアップ
 
@@ -69,7 +72,11 @@ cd backend
 ブラウザで http://127.0.0.1:8730 を開く。
 
 - 起動時と60秒ごとに claude CLI / codex CLI のログを自動同期する
-- DBは `backend/data/cairn.db`（消せば全データを再構築できる）
+- DBは `backend/data/cairn.db`。**注意**: chunks・FTS・embeddings・vec 索引・
+  item_links などの派生データは原本テーブル（conversations / messages / items）から
+  `cairn index rebuild` で再構築できるが、**DB ファイル自体を消すと ChatGPT / Claude /
+  Gemini の手動エクスポート由来の会話は元の ZIP / JSON がなければ復元できない**。
+  削除前に `python -m app.admin backup` を取ること
 
 開発時（フロントエンドのホットリロードが欲しい場合）は別ターミナルで
 `cd frontend && npm run dev` を実行し http://localhost:5173 を開く
@@ -190,8 +197,12 @@ Settings → Developer → Edit Config で `claude_desktop_config.json` に追�
 同期とレビューは launchd の2エージェントで無人運用します（DESIGN.md §5.7）:
 
 - `com.masato.cairn.sync` — 毎時 `cairn sync all`（会話 + Karakeep + Zotero +
-  Obsidian → 90 Auto 一覧）
-- `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`
+  Obsidian → 90 Auto 一覧）。Karakeep は通常は増分（createdAt カーソル）だが、
+  24時間ごとに full sweep へ自動昇格して古いブックマークの編集・削除を反映する
+  （full 成功時のみ上流削除を prune）
+- `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`。
+  対象は「直近に締まった週」（締め＝日曜18:00）なので、ログイン時の実行は
+  Mac が日曜に落ちていて取りこぼした週の補完のみを生成する
 
 導入は `ops/launchd/install.sh`（plist を生成して `~/Library/LaunchAgents` へ配置。
 `launchctl bootstrap` は自分で実行。手順は同スクリプトが表示）。ログは
@@ -281,65 +292,38 @@ Host/Origin が localhost 以外のリクエストはミドルウェアが拒否
 
 詳細は [SECURITY.md](SECURITY.md) を参照してください。
 
-## `cairn` CLI（M0 骨格）
+## `cairn` CLI（統合層）
 
 `backend/bin/cairn` は typer 製の CLI ラッパーで、統合層のサブコマンドを 1 本にまとめる
-入口。M0 では骨格のみで、`sync conversations`（既存 CLI ログ同期）だけが実装済み。
-残り（`sync karakeep|zotero|obsidian|all`、`review weekly`、`index rebuild`）は
-DESIGN.md §7 の M1〜M4 で順次実装され、それまでは実装先マイルストーンを添えて
-exit 1 で失敗する。
+入口。M0〜M5 で全コマンドが実装済み:
+
+```bash
+cairn sync [conversations|karakeep|zotero|obsidian|all]   # 取り込み
+cairn review weekly [--week 2099-W01]                     # 週次レビュー生成
+cairn index rebuild                                       # 派生データの穴埋め再構築
+```
 
 ```bash
 # PATH に通すには（推奨）:
 ln -s /abs/path/to/cairn/backend/bin/cairn ~/bin/cairn
 cairn --help
-
-# 直接叩く場合:
-/path/to/cairn/backend/bin/cairn sync conversations
 ```
 
 editable install（`pip install -e .` で `cairn` を PATH に登録）は M6 で検討する。
 
-## M0 スキーマ適用手順（実 DB を v10 → v11 に上げる）
+## スキーマ migration（現行 v12）
 
-M0 で `_SCHEMA_VERSION` が 10 → 11 になり、`items` / `item_links` / `sync_state` の
-追加と、既存 conversations の items バックフィルが走る。運用中の `cairn.db` に
-適用する手順:
+schema 変更は追加のみ（invariant 3）。新しいコードが古い DB を開くと `connect()` が
+migration を自動実行し、実行前に premigrate バックアップ
+（`data/cairn.db.premigrate-v<N>-to-v<M>-*`）を自動で作る。運用 DB に適用する際の
+一般手順:
 
-1. **稼働中サービスを止める**（旧コードが新スキーマの DB を開くのは additive なので
-   安全だが、順序として停止 → migrate が確実）:
-
-   ```bash
-   launchctl stop com.masato.cairn
-   ```
-
-2. **実 DB のコピーへドライラン**（migration 自体が自動 backup を取るが、
-   その前に安全側のコピーを作る）:
-
-   ```bash
-   cd backend
-   .venv/bin/python -m app.admin backup   # cairn.db.backup-<日時>
-   CAIRN_DB=data/cairn.db.backup-XXXXXX .venv/bin/python -m app.admin integrity-check
-   # → v11 migration がコピー上で成功し、items 件数 == conversations 件数、
-   #   chunks_missing_item_id=0、ok:true を確認
-   ```
-
-3. **本 DB へ適用**（`connect()` が v11 migration を走らせ、premigrate バックアップも
-   自動で作る）:
-
-   ```bash
-   .venv/bin/python -m app.admin integrity-check
-   # 期待: ok:true / conversations_missing_item=0 / chunks_missing_item_id=0
-   ```
-
-4. **サービス再起動**:
-
-   ```bash
-   launchctl start com.masato.cairn
-   ```
-
-5. **クリーンアップ**: `data/cairn.db.premigrate-v10-to-v11-*` と手動 backup は
-   会話本文を平文で含む。動作確認後に削除する。
+1. `launchctl stop com.masato.cairn` でサービス停止
+2. `python -m app.admin backup` で手動バックアップ →
+   `CAIRN_DB=<コピー> python -m app.admin integrity-check` でコピー上のドライラン
+3. 本 DB で `python -m app.admin integrity-check`（migration が走り ok:true を確認）
+4. `launchctl start com.masato.cairn` で再開
+5. premigrate / 手動バックアップは会話本文を平文で含むため、動作確認後に削除
 
 ## テスト
 
