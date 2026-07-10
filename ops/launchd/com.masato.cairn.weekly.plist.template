@@ -6,9 +6,13 @@
     <key>Label</key>
     <string>com.masato.cairn.weekly</string>
 
-    <!-- Sunday 18:00 + login `cairn review weekly` (DESIGN.md §5.7, M4).
-         Exit 0 on creation and when the week already exists; a real error
-         exits 1 and (via CAIRN_NOTIFY below) posts a macOS notification. -->
+    <!-- Sunday 18:00 + login `cairn review weekly` (DESIGN.md §5.7, M4/M6).
+         The command targets the most recently CLOSED week (close = Sunday
+         18:00 local), so the RunAtLoad login run only back-fills a week
+         missed while the Mac was off — it never generates the in-progress
+         week early. Exit 0 on creation and when the week already exists;
+         a real error exits 1 and (via CAIRN_NOTIFY below) posts a macOS
+         notification. -->
     <key>ProgramArguments</key>
     <array>
         <string>{{BACKEND_DIR}}/bin/cairn</string>

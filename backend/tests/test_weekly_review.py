@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-NOW = datetime(2026, 7, 4, 12, 0, 0, tzinfo=timezone.utc)  # ISO week 2026-W27
+# Monday noon UTC → the most recently closed week (Sunday 18:00 close) is
+# 2026-W27 in every timezone the suite may run in.
+NOW = datetime(2026, 7, 6, 12, 0, 0, tzinfo=timezone.utc)
 OLD = "2026-05-01T00:00:00Z"
 THIS_WEEK = "2026-07-02T00:00:00Z"
 
@@ -154,6 +156,31 @@ def test_week_option_sets_filename_and_window(env):
     assert not (weekly_dir(vault) / "2026-W27.md").exists()
 
 
+def test_default_week_is_most_recently_closed(env):
+    """レビュー指摘 3.1: 週の途中（ログイン時 RunAtLoad など）に実行しても
+    進行中の週を早期生成しない — 対象は直近に締まった週（前週）になる。"""
+    db, vault = env
+    from app.deliver import weekly_review
+    saturday = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)  # W27 の土曜
+    out = weekly_review.run(now=saturday, llm=fixture_llm([DRAFT]))
+    assert out["week"] == "2026-W26"       # 進行中の W27 ではなく前週
+    assert not (weekly_dir(vault) / "2026-W27.md").exists()
+
+
+def test_sunday_close_hour_switches_target_week(env):
+    """日曜はローカル18:00（launchd の定時）を境に対象週が切り替わる。"""
+    db, vault = env
+    from app.deliver import weekly_review
+    local_tz = datetime.now().astimezone().tzinfo
+    morning = datetime(2026, 7, 5, 9, 0, tzinfo=local_tz)    # 日曜 9:00
+    evening = datetime(2026, 7, 5, 18, 30, tzinfo=local_tz)  # 日曜 18:30
+    assert weekly_review._resolve_week(None, morning)[0] == "2026-W26"
+    week_id, ref = weekly_review._resolve_week(None, evening)
+    assert week_id == "2026-W27"
+    # ref は対象週の日曜 23:59:59（ローカル）— --week 指定時と同じ基準点
+    assert (ref.year, ref.month, ref.day, ref.hour) == (2026, 7, 5, 23)
+
+
 def test_week_option_rejects_garbage(env):
     from app.deliver import weekly_review
     with pytest.raises(ValueError):
@@ -196,7 +223,7 @@ def test_stale_export_warning(env):
     from app.deliver import weekly_review
     out = weekly_review.run(now=NOW, llm=fixture_llm([DRAFT]))
     md = (weekly_dir(vault) / "2026-W27.md").read_text()
-    assert "> ⚠️ claude の最終取り込みは 2026-05-01（64日前）" in md
+    assert "> ⚠️ claude の最終取り込みは 2026-05-01（65日前）" in md
     assert "> ⚠️ gemini のエクスポートは一度も取り込まれていません" in md
     assert "chatgpt の最終取り込み" not in md
     assert out["status"] == "created"

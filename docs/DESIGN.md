@@ -326,7 +326,9 @@ CREATE TABLE sync_state (
 - 既存の管理 CLI `python -m app.admin`（redact / backup / integrity-check / import-runs 等）は**温存**し、M0〜M5 では触れない。二重 CLI の解消（`cairn admin ...` への吸収）は M6 で検討する。それまで新 `cairn` CLI は sync / review / index のみを担う。
 - launchd: `ops/launchd/*.plist.template`（絶対パスは変数化）。**エージェントは2本に集約**:
   - `com.masato.cairn.sync` — 1時間ごと `cairn sync all`
-  - `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`
+  - `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`。対象は「直近に締まった週」
+    （締め＝日曜18:00 ローカル）: 定時実行はその週を、ログイン時（RunAtLoad）は取りこぼした週の
+    補完のみを生成する。進行中の週を早期生成して後半の活動を欠いたまま固定しない（v1.2）
   - ログ: `~/Library/Logs/cairn/`。旧 brain-sync の4エージェントは M3 で unload・削除。
 
 ---
