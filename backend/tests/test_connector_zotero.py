@@ -141,6 +141,43 @@ def test_attachments_and_notes_filtered(db):
         "SELECT COUNT(*) FROM items WHERE source='zotero'").fetchone()[0] == 1
 
 
+def test_full_sweep_prunes_deleted_references(db):
+    """レビュー指摘 3.4: 完全な listing（--full）が成功したときだけ、Zotero 側で
+    削除された文献を registry から prune する。増分では prune しない。"""
+    sync_zotero(client=transport(
+        lambda p: httpx.Response(200, json=[zitem("KEY1"), zitem("KEY2")],
+                                 headers={"Last-Modified-Version": "42"}), []))
+    # incremental: KEY2 was deleted upstream but must survive (no prune)
+    stats = sync_zotero(client=transport(
+        lambda p: httpx.Response(200, json=[],
+                                 headers={"Last-Modified-Version": "43"}), []))
+    assert stats["pruned"] == 0
+    assert db.connect().execute(
+        "SELECT COUNT(*) FROM items WHERE source='zotero'").fetchone()[0] == 2
+    # full sweep: complete listing without KEY2 → pruned
+    stats = sync_zotero(client=transport(
+        lambda p: httpx.Response(200, json=[zitem("KEY1")],
+                                 headers={"Last-Modified-Version": "43"}), []),
+        full=True)
+    assert stats["pruned"] == 1
+    ids = {r["external_id"] for r in db.connect().execute(
+        "SELECT external_id FROM items WHERE source='zotero'")}
+    assert ids == {"KEY1"}
+
+
+def test_empty_full_listing_does_not_prune(db):
+    sync_zotero(client=transport(
+        lambda p: httpx.Response(200, json=[zitem("KEY1")],
+                                 headers={"Last-Modified-Version": "42"}), []))
+    stats = sync_zotero(client=transport(
+        lambda p: httpx.Response(200, json=[],
+                                 headers={"Last-Modified-Version": "42"}), []),
+        full=True)
+    assert stats["pruned"] == 0
+    assert db.connect().execute(
+        "SELECT COUNT(*) FROM items WHERE source='zotero'").fetchone()[0] == 1
+
+
 def test_error_keeps_cursor_and_records_last_error(db):
     sync_zotero(client=transport(
         lambda p: httpx.Response(200, json=[zitem("KEY1")],
