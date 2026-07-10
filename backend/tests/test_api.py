@@ -142,6 +142,27 @@ def test_sync_conflict_while_locked(client):
     assert client.post("/api/sync", headers={"host": "localhost"}).status_code == 200
 
 
+def test_sync_conflict_while_other_process_scans(client):
+    """D12: threading.Lock はプロセス間で効かないため、別プロセス（毎時の
+    `cairn sync all`）が保持する flock も 409 にする。別 fd での flock は
+    同一プロセス内でも競合するので、それで他プロセスを模す。"""
+    import fcntl
+    import os
+    from app import cli_sync
+
+    path = cli_sync._lock_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        r = client.post("/api/sync", headers={"host": "localhost"})
+        assert r.status_code == 409
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert client.post("/api/sync", headers={"host": "localhost"}).status_code == 200
+
+
 # --- /api/search mode parameter (P2-2) ----------------------------------------
 
 def test_search_default_mode_is_keyword(client):

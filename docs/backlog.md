@@ -1,6 +1,6 @@
 # Cairn 作業候補（backlog）
 
-最終更新: 2026-07-06
+最終更新: 2026-07-10
 
 **今なにをすべきかの正典は DESIGN.md §7（マイルストーン）**。本ファイルはマイルストーン外の
 細かい作業候補の置き場。現況の詳細な棚卸し・残課題・拡張設計は
@@ -15,6 +15,9 @@
   launchd 稼働・失敗ゼロ、週次レビュー W27/W28 生成済み、MCP 登録済み
 - **残: M6③のみ** = 実運用評価（〜2026-07 下旬）+ 件数上限/related チューニング。
   この期間は機能追加をしない（status doc §4 R2 の評価手順に従う）
+- 2026-07-10: 外部レビュー第1段階の修正6件を反映（weekly 対象週ルール / Karakeep full sweep
+  自動昇格 + prune / MCP title フェンス + meta ホワイトリスト / 会話同期の flock 直列化 =
+  D12 / README 実態化）。DESIGN.md は v1.2
 
 ## 採用基準
 
@@ -59,6 +62,8 @@ status doc §5.1 の詳細参照。
 | C4 | CI（pytest + 依存監査 + frontend build） | S |
 | C5 | 添付 download API + viewer UI | S |
 | C6 | `admin` CLI の `cairn admin` への統合（§5.7 M6 検討事項） | M |
+| C7 | 複数 Mac の claude/codex ログ集約（端末 ID 付き staging 方式。外部レビュー §4.1） | M |
+| C8 | Obsidian Vault の複数端末同期方式を運用文書に明記（外部レビュー §4.2） | XS |
 
 ## D. Decision Record / DESIGN.md 改訂が必要な拡張
 

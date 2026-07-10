@@ -5,6 +5,12 @@ obsidian_writer allowlist ("weekly" = new-only; an existing week is never
 overwritten — the run reports "exists" and succeeds, 旧仕様踏襲, so the
 launchd login trigger stays quiet after Sunday's run).
 
+Without --week the target is 直近に締まった週 (a week closes Sunday
+WEEK_CLOSE_HOUR local, matching the launchd schedule): the Sunday-evening
+run generates that week, and any earlier run — including RunAtLoad at
+login — can only back-fill a missed week, never freeze the in-progress
+week early with its後半の活動 missing (レビュー指摘 3.1).
+
 Sections (§5.4): 今週の活動 (4 sources, ≤10 each) / 過去からの関連 (the
 system's core — related items ≥14 days old, each with a one-line reason) /
 統合メモ (AI draft). The draft comes from local ollama via the Phase-3
@@ -181,15 +187,33 @@ def stale_exports(now: datetime | None = None) -> list[dict]:
 
 # --- week handling -----------------------------------------------------------
 
+# A review week "closes" at this local hour on Sunday — the same moment the
+# launchd agent's StartCalendarInterval fires (§5.7).
+WEEK_CLOSE_HOUR = 18
+
+
 def _resolve_week(week: str | None, now: datetime | None) -> tuple[str, datetime]:
-    """(week_id, reference now). Without --week: current ISO week, now as-is.
+    """(week_id, reference now).
+
+    Without --week: the most recently CLOSED week (close = Sunday
+    WEEK_CLOSE_HOUR local). From Sunday 18:00 that is the current ISO week
+    (the scheduled run); before that it is the previous week — so a login
+    (RunAtLoad) run only back-fills a week whose file is missing and never
+    generates the in-progress week early. The reference point is the target
+    week's Sunday 23:59:59 local.
+
     With --week (テスト用, 旧仕様の BRAIN_SYNC_WEEK 相当): the file name AND
-    the activity window both follow that week — the reference point becomes
-    that ISO week's Sunday 23:59:59 local, so a fixture-dated archive
-    produces a deterministic review."""
+    the activity window both follow that week — same Sunday-23:59:59
+    reference, so a fixture-dated archive produces a deterministic review."""
     if week is None:
         local = _now_local(now)
-        return f"{local:%G}-W{local:%V}", (now or datetime.now(timezone.utc))
+        days_since_sunday = (local.weekday() + 1) % 7  # Sun→0, Mon→1, …
+        sunday = local.date() - timedelta(days=days_since_sunday)
+        if days_since_sunday == 0 and local.hour < WEEK_CLOSE_HOUR:
+            sunday -= timedelta(days=7)  # this week hasn't closed yet
+        iso = sunday.isocalendar()
+        ref = datetime.combine(sunday, time(23, 59, 59)).astimezone()
+        return f"{iso[0]}-W{iso[1]:02d}", ref
     m = _WEEK_RE.match(week)
     if not m:
         raise ValueError(f"invalid --week (expected YYYY-Www): {week!r}")
@@ -355,7 +379,8 @@ def run(
     llm=None,
     provider=None,
 ) -> dict:
-    """Generate and write this week's review. Returns a status dict.
+    """Generate and write the most recently closed week's review (or the
+    explicit --week). Returns a status dict.
 
     status "exists": the week's file is already there — nothing is touched
     (D6/旧仕様: 既存週は上書きしない) and the caller should exit 0.

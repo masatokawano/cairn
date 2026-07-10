@@ -126,11 +126,16 @@ def sync_all() -> None:
 @review_app.command("weekly")
 def review_weekly(
     week: str | None = typer.Option(
-        None, "--week", help="ISO week (e.g. 2099-W01). Defaults to the current week.",
+        None, "--week",
+        help="ISO week (e.g. 2099-W01). Defaults to the most recently closed "
+             "week (a week closes Sunday 18:00 local).",
     ),
 ) -> None:
     """Generate the weekly review into 40 Reviews/Weekly (M4, DESIGN.md §5.4).
 
+    Without --week the target is the most recently closed week (close =
+    Sunday 18:00 local, the launchd schedule) — a login-triggered run only
+    back-fills a missed week and never generates the in-progress week early.
     Exit 0 both on creation and when the week's file already exists (the
     launchd login trigger re-runs this; an existing week must stay quiet).
     A failed AI draft is reported in the JSON but does not fail the run (S4).

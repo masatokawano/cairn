@@ -5,13 +5,22 @@ file's (mtime, size) against ingest_files, and re-parses only changed files.
 A background thread calls scan_once() every CAIRN_SYNC_INTERVAL seconds
 (default 60). Polling instead of FS events keeps deps minimal and survives
 editor/atomic-rename weirdness.
+
+The same scan also runs from the hourly `cairn sync all` LaunchAgent — a
+separate process, which `ingest_lock` (threading.Lock) cannot see. Both
+entry points therefore additionally take an OS-level flock on a sidecar
+file next to the DB (D12), so the server's 60s poll and the LaunchAgent
+never process the same log concurrently (duplicate import_runs rows /
+SQLite write contention).
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import logging
 import os
 import threading
+from contextlib import contextmanager
 
 from . import db
 from .parsers import PARSER_VERSION, claude_cli, codex_cli
@@ -41,20 +50,56 @@ def _iter_jsonl(root: str):
 ingest_lock = threading.Lock()
 
 
+def _lock_path() -> str:
+    """Sidecar lock file next to the DB (derived per call — CAIRN_DB varies
+    per test). The DB file itself can't be flocked: SQLite owns its locks."""
+    return os.path.join(
+        os.path.dirname(os.path.abspath(db.DB_PATH)), ".cairn-sync.lock"
+    )
+
+
+@contextmanager
+def _process_lock(*, blocking: bool):
+    """Cross-process exclusive lock around a scan (D12). Yields True when
+    held; with blocking=False yields False instead of waiting when another
+    process (e.g. the hourly LaunchAgent) is already scanning."""
+    path = _lock_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def scan_once() -> dict:
     """Scan both CLI log trees; import changed files. Returns stats.
-    Blocks until the ingest lock is free."""
+    Blocks until both the in-process ingest lock and the cross-process
+    flock are free."""
     with ingest_lock:
-        return _scan()
+        with _process_lock(blocking=True):
+            return _scan()
 
 
 def try_scan_once() -> dict | None:
     """Like scan_once(), but returns None instead of waiting if another
-    sync/import is already running (used by POST /api/sync → 409)."""
+    sync/import is already running — in this process (POST /api/sync → 409)
+    or in another one (the hourly `cairn sync all` LaunchAgent)."""
     if not ingest_lock.acquire(blocking=False):
         return None
     try:
-        return _scan()
+        with _process_lock(blocking=False) as held:
+            if not held:
+                return None
+            return _scan()
     finally:
         ingest_lock.release()
 

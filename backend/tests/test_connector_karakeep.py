@@ -90,7 +90,9 @@ def test_first_sync_paginates_and_maps(db):
     assert "本文" in json.loads(rows["bm-3"]["meta"])["text"]
 
     state = db.get_sync_state("karakeep")
-    assert state["cursor"] == {"last_created_at": "2026-07-01T00:00:00Z"}
+    assert state["cursor"]["last_created_at"] == "2026-07-01T00:00:00Z"
+    # a first sync has no cursor → it runs as a full sweep and records it
+    assert state["cursor"]["last_full_sync_at"]
     assert state["last_error"] is None
 
 
@@ -189,6 +191,64 @@ def test_missing_base_url_raises(db, monkeypatch):
     with pytest.raises(ConnectorError):
         sync_karakeep(client=httpx.Client(transport=httpx.MockTransport(
             lambda r: httpx.Response(200, json={"bookmarks": []}))))
+
+
+def test_full_sweep_prunes_deleted_bookmarks(db):
+    """レビュー指摘 3.4: full sweep が完全成功したときだけ、上流で削除された
+    ブックマークを registry から prune する。"""
+    sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_OLD, B_MID], "nextCursor": None}}, []))
+    # bm-1 deleted upstream; the full sweep only returns bm-2
+    stats = sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_MID], "nextCursor": None}}, []), full=True)
+    assert stats["pruned"] == 1
+    ids = {r["external_id"] for r in db.connect().execute(
+        "SELECT external_id FROM items WHERE source='karakeep'")}
+    assert ids == {"bm-2"}
+
+
+def test_incremental_never_prunes(db):
+    sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_OLD, B_MID], "nextCursor": None}}, []))
+    b_newer = bookmark("bm-9", "2026-07-02T00:00:00Z",
+                       url="https://example.com/fresh", title="Fresh")
+    # last_full_sync_at is fresh → this run stays incremental even though
+    # the page no longer contains the old bookmarks
+    stats = sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [b_newer], "nextCursor": None}}, []))
+    assert stats["full"] is False and stats["pruned"] == 0
+    count = db.connect().execute(
+        "SELECT COUNT(*) FROM items WHERE source='karakeep'").fetchone()[0]
+    assert count == 3  # bm-1 / bm-2 still there
+
+
+def test_full_sweep_auto_promotes_after_interval(db):
+    """レビュー指摘 3.2: 古いブックマークの編集・削除は増分同期に映らないため、
+    last_full_sync_at が閾値を超えたら通常 sync が full sweep へ自動昇格する。"""
+    sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_OLD, B_MID], "nextCursor": None}}, []))
+    state = db.get_sync_state("karakeep")
+    db.set_sync_state("karakeep", cursor={
+        "last_created_at": state["cursor"]["last_created_at"],
+        "last_full_sync_at": "2026-07-01T00:00:00Z",  # 閾値超え（過去）
+    })
+    stats = sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_MID], "nextCursor": None}}, []))  # no full=True
+    assert stats["full"] is True
+    assert stats["pruned"] == 1  # bm-1 removed upstream → pruned
+    assert db.get_sync_state("karakeep")["cursor"]["last_full_sync_at"] \
+        > "2026-07-01T00:00:00Z"
+
+
+def test_empty_full_listing_does_not_prune(db):
+    sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [B_OLD], "nextCursor": None}}, []))
+    stats = sync_karakeep(client=paged_transport(
+        {None: {"bookmarks": [], "nextCursor": None}}, []), full=True)
+    assert stats["pruned"] == 0
+    count = db.connect().execute(
+        "SELECT COUNT(*) FROM items WHERE source='karakeep'").fetchone()[0]
+    assert count == 1
 
 
 def test_external_text_is_redacted(db):

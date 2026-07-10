@@ -127,6 +127,11 @@ Cairn は Karakeep/Zotero/Obsidian に対して**読み取り専用**。原本�
 - 旧 brain-sync の LaunchAgent 4本は M3 完了まで稼働を継続する。移行期間中も週次レビューは無停止。
 - 本決定は ADR-0003（brainsync を独立パッケージとし Cairn へは HTTP のみで接続する案）の architecture 判断を supersede する。理由の記録は `docs/adr/0004-design-adoption.md`。要点: 横断ハイブリッド検索（FTS5 + sqlite-vec + RRF）を4系統に効かせるには索引の cairn.db 一元化（D3）が必須であり、HTTP 越しのリスト合成では S5 に到達できない。信頼境界の懸念は read-only connector・書き込み allowlist（§5.5）・D9 で処理する。
 
+### D12: CLI 会話ログ同期は 2 経路（サーバ内60秒 + launchd 毎時）を維持し、プロセス間 flock で直列化する — 採用（v1.2 追加）
+
+- CLI ログ同期は FastAPI サーバ内の60秒ポーリングと launchd 毎時 `cairn sync all` の両方から走る。片方への一本化案（外部レビュー 2026-07-10 指摘 3.5）は、60秒側を消すと即時性を、毎時側から conversations を外すとサーバ停止時のフォールバックを失うため不採用。
+- 代わりに両経路を DB 隣のサイドカーファイルへの `flock` で直列化する（`threading.Lock` はプロセス内のみ有効）。重複実行の実害（import_runs の重複行・SQLite write contention）はロックで消え、後着側は file_state 比較により no-op で抜ける。
+
 ---
 
 ## 3. アーキテクチャ
@@ -248,8 +253,8 @@ CREATE TABLE sync_state (
 
 個別:
 
-- **karakeep.py**: 全ブックマークを items(kind='bookmark') へ。タグは meta に。`to-review` タグは週次レビューの対象抽出に使う。
-- **zotero.py**: 書誌のみ items(kind='reference') へ。DOI を items.doi に正規化格納。Zotero の library version をカーソルに使う。
+- **karakeep.py**: 全ブックマークを items(kind='bookmark') へ。タグは meta に。`to-review` タグは週次レビューの対象抽出に使う。API に modified-since がないため増分は createdAt カーソル。古いブックマークの編集・削除を収束させるため、24時間ごとに full sweep へ自動昇格し、full sweep が完全成功（非空 listing）したときのみ上流削除を prune する（v1.2）。
+- **zotero.py**: 書誌のみ items(kind='reference') へ。DOI を items.doi に正規化格納。Zotero の library version をカーソルに使う（編集は since で拾える）。削除の反映は完全 listing（初回 / --full）成功時の prune のみ（v1.2）。
 - **obsidian.py**: Vault の対象ディレクトリ（§4）を走査し items(kind='note') へ。ファイルの mtime + hash で差分検出。読み取りのみ。
 
 ### 5.2 core/urlnorm.py（重要・テスト厚め）
@@ -326,7 +331,9 @@ CREATE TABLE sync_state (
 - 既存の管理 CLI `python -m app.admin`（redact / backup / integrity-check / import-runs 等）は**温存**し、M0〜M5 では触れない。二重 CLI の解消（`cairn admin ...` への吸収）は M6 で検討する。それまで新 `cairn` CLI は sync / review / index のみを担う。
 - launchd: `ops/launchd/*.plist.template`（絶対パスは変数化）。**エージェントは2本に集約**:
   - `com.masato.cairn.sync` — 1時間ごと `cairn sync all`
-  - `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`
+  - `com.masato.cairn.weekly` — 日曜18:00 + ログイン時 `cairn review weekly`。対象は「直近に締まった週」
+    （締め＝日曜18:00 ローカル）: 定時実行はその週を、ログイン時（RunAtLoad）は取りこぼした週の
+    補完のみを生成する。進行中の週を早期生成して後半の活動を欠いたまま固定しない（v1.2）
   - ログ: `~/Library/Logs/cairn/`。旧 brain-sync の4エージェントは M3 で unload・削除。
 
 ---
@@ -449,6 +456,18 @@ CREATE TABLE sync_state (
 ---
 
 ## 11. 改訂記録
+
+### v1.2（2026-07-10）
+
+外部レビュー（GitHub 最新状態レビュー 2026-07-10）の第1段階修正を反映。アーキテクチャは不変。
+
+- §5.1 karakeep: 増分同期（createdAt カーソル）に加え、24時間ごとの full sweep 自動昇格と
+  full 成功時の上流削除 prune を明記（指摘 3.2 / 3.4）
+- §5.1 zotero: 完全 listing（初回 / --full）成功時の prune を明記（指摘 3.4）
+- §5.7 weekly: 対象週を「直近に締まった週」（締め＝日曜18:00 ローカル）と定義。
+  ログイン時（RunAtLoad）実行は取りこぼした週の補完のみ（指摘 3.1）
+- D12: CLI 会話ログ同期 2 経路（サーバ内60秒 + launchd 毎時）のプロセス間 flock 直列化を新設（指摘 3.5）
+- MCP: search_all / get_item の title もフェンス、get_item の meta はホワイトリスト投影に統一（指摘 3.3、§6.1/§6.2 の適合修正）
 
 ### v1.1（2026-07-02）
 

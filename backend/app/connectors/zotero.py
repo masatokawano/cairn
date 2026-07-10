@@ -12,8 +12,10 @@ Incremental model (DESIGN.md §5.1: library version as the cursor): every
 response carries ``Last-Modified-Version``; we request
 ``/users/{id}/items/top?since=<stored version>`` so only items changed after
 the last sync come back, and store the new library version on success.
-Deletions are not mirrored in M1 — a stale registry row for a deleted
-Zotero item is harmless and disappears on a future full rebuild.
+Deletions are mirrored only on a complete listing (first sync or ``--full``):
+after a fully successful sweep the registry rows missing upstream are pruned.
+Incremental runs never prune — a stale row for a deleted Zotero item lingers
+until the next ``cairn sync zotero --full``.
 """
 from __future__ import annotations
 
@@ -139,12 +141,20 @@ def sync(
                 break
             start += PAGE_LIMIT
         stats = db.upsert_items(SOURCE, "reference", records)
+        # since=None means every page was fetched → `records` is the complete
+        # top-level listing, so upstream deletions can be pruned. Incremental
+        # (since set) or empty listings never prune (API 異常で全消ししない).
+        pruned = 0
+        if since is None and records:
+            pruned = db.prune_items(
+                SOURCE, keep_external_ids=[r["external_id"] for r in records]
+            )
     except Exception as exc:
         db.set_sync_state(SOURCE, error=f"{type(exc).__name__}: {exc}")
         raise
 
     index_stats = index_changed_items(stats["changed_ids"]) if stats["changed_ids"] else None
-    links = db.rebuild_item_links() if stats["changed_ids"] else None
+    links = db.rebuild_item_links() if stats["changed_ids"] or pruned else None
     db.set_sync_state(SOURCE, cursor={"library_version": library_version})
     return {
         "source": SOURCE,
@@ -152,6 +162,7 @@ def sync(
         "inserted": stats["inserted"],
         "updated": stats["updated"],
         "skipped": stats["skipped"],
+        "pruned": pruned,
         "index": index_stats,
         "links": links,
         "full": full,
