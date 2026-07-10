@@ -127,6 +127,11 @@ Cairn は Karakeep/Zotero/Obsidian に対して**読み取り専用**。原本�
 - 旧 brain-sync の LaunchAgent 4本は M3 完了まで稼働を継続する。移行期間中も週次レビューは無停止。
 - 本決定は ADR-0003（brainsync を独立パッケージとし Cairn へは HTTP のみで接続する案）の architecture 判断を supersede する。理由の記録は `docs/adr/0004-design-adoption.md`。要点: 横断ハイブリッド検索（FTS5 + sqlite-vec + RRF）を4系統に効かせるには索引の cairn.db 一元化（D3）が必須であり、HTTP 越しのリスト合成では S5 に到達できない。信頼境界の懸念は read-only connector・書き込み allowlist（§5.5）・D9 で処理する。
 
+### D12: CLI 会話ログ同期は 2 経路（サーバ内60秒 + launchd 毎時）を維持し、プロセス間 flock で直列化する — 採用（v1.2 追加）
+
+- CLI ログ同期は FastAPI サーバ内の60秒ポーリングと launchd 毎時 `cairn sync all` の両方から走る。片方への一本化案（外部レビュー 2026-07-10 指摘 3.5）は、60秒側を消すと即時性を、毎時側から conversations を外すとサーバ停止時のフォールバックを失うため不採用。
+- 代わりに両経路を DB 隣のサイドカーファイルへの `flock` で直列化する（`threading.Lock` はプロセス内のみ有効）。重複実行の実害（import_runs の重複行・SQLite write contention）はロックで消え、後着側は file_state 比較により no-op で抜ける。
+
 ---
 
 ## 3. アーキテクチャ
