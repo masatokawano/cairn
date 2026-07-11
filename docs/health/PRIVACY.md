@@ -14,7 +14,12 @@ metadata, logs, and backups.
 - the user's FileVault-protected Mac;
 - local Cairn processes;
 - explicitly selected local storage;
-- the user's Obsidian vault within existing write allowlists.
+- the user's Obsidian vault within existing write allowlists — **on this Mac
+  only**. The vault is replicated to other devices by synchronization tools
+  (as of 2026-07-11: Syncthing between Macs, and Remotely Save over WebDAV
+  for mobile). Anything written into the vault propagates to every replica,
+  so vault delivery of health content is governed by §10 (decision H5-P1),
+  not by this trust entry.
 
 ### Not trusted by default
 
@@ -162,6 +167,26 @@ Requirements:
 - no silent cloud replication;
 - deletion procedure that enumerates raw files, database, derived data, reports, and backups;
 - explicit user confirmation for destructive deletion.
+
+### Vault replication of health reports (decision H5-P1)
+
+Health reports delivered to `90 Auto/Health/` would otherwise replicate to
+every vault sync target: other Macs via Syncthing, and the WebDAV server plus
+mobile devices via Remotely Save. That is cloud replication in the sense of
+this section, even when the WebDAV host is self-managed.
+
+Policy:
+
+- **Default: excluded.** `90 Auto/Health` is listed in the vault's Syncthing
+  `.stignore` and must be added to the Remotely Save skip configuration on
+  every device before H5 delivery starts. Health reports then exist only on
+  the Mac that runs Cairn.
+- **Opt-in is per-report-type, not blanket.** If specific outputs are wanted
+  on other devices (the strongest case is `next-visit-brief.md` on a phone at
+  a clinic), that report type is opted in explicitly, the decision is recorded
+  here with its date and rationale, and the remaining report types stay
+  excluded.
+- H5 delivery must not begin until this decision (H5-P1) is recorded as made.
 
 ## 11. Consequential-action boundary
 

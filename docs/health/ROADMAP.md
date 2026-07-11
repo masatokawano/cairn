@@ -107,6 +107,10 @@ Observation
 
 Causal inference is not claimed automatically.
 
+### Completion
+
+All H2 criteria in `ACCEPTANCE.md`.
+
 ## H3 — Apple Health selected import
 
 ### Goal
@@ -135,7 +139,7 @@ Add high-frequency personal measurements without turning Cairn into a raw sensor
 
 ### Completion
 
-All H2 Apple Health criteria in `ACCEPTANCE.md`.
+All H3 criteria in `ACCEPTANCE.md`.
 
 ## H4 — Medical documents and evidence linkage
 
@@ -176,7 +180,11 @@ Produce outputs that are useful in daily life and clinical conversations.
 - snapshot and template versions recorded
 - source and observation IDs listed
 - uncertainty and missingness visible
-- existing Obsidian allowlists respected
+- writable area stays inside the existing `90 Auto` / `00 Inbox/AI Drafts` trees; the
+  `90 Auto/Health` subdirectory requires adding a `health` category to the
+  `obsidian_writer.py` allowlist (see H-D7) before delivery starts
+- the vault-replication decision H5-P1 (`PRIVACY.md` §10) resolved before the
+  first real-data report is written into the vault
 
 ## H6 — AI interpretation and revision trail
 
@@ -273,5 +281,12 @@ For the current short implementation window:
 4. implement H1 completely with synthetic tests;
 5. perform local real-data verification;
 6. stop and review before H2.
+
+Relationship to the Cairn main line: the M6③ evaluation freeze
+(`docs/backlog.md`, until late July 2026) protects the recall/related tuning
+evaluation on `cairn.db`. H0/H1 touch neither `cairn.db` nor any existing
+pipeline, and were explicitly exempted from the freeze by the repository owner
+on 2026-07-11. Work that does touch Cairn integration (H5 Obsidian delivery,
+H7 MCP) stays behind the freeze and its own reviews.
 
 The first success is not “all health data imported.” It is one complete laboratory-data validation trail that can be trusted and reproduced.

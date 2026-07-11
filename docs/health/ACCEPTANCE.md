@@ -46,7 +46,17 @@ The fixture contains:
 - [ ] Logs contain counts and IDs, but no measurement values.
 - [ ] A deterministic Markdown summary can be generated from a fixed snapshot.
 
-## H2 — Apple Health export
+## H2 — Intervention and event ledger
+
+- [ ] Medication, supplement, lifestyle, illness, travel, and procedure events validate against a schema.
+- [ ] Exact, date-only, month-only, and approximate times are represented without invented timestamps.
+- [ ] Dose, unit, frequency, source, and confidence are optional but structured.
+- [ ] Event histories are append-only and support correction through supersession.
+- [ ] Active event intervals can be overlaid on an observation timeline.
+- [ ] A missing or uncertain start date is visible as uncertainty.
+- [ ] Free-text event notes are not interpreted as medical facts automatically.
+
+## H3 — Apple Health export
 
 ### Synthetic fixture
 
@@ -76,16 +86,6 @@ The fixture contains synthetic records for:
 - [ ] Workout routes and location-bearing records are excluded initially.
 - [ ] Daily and weekly aggregates can be regenerated from normalized records.
 
-## H3 — Intervention and event ledger
-
-- [ ] Medication, supplement, lifestyle, illness, travel, and procedure events validate against a schema.
-- [ ] Exact, date-only, month-only, and approximate times are represented without invented timestamps.
-- [ ] Dose, unit, frequency, source, and confidence are optional but structured.
-- [ ] Event histories are append-only and support correction through supersession.
-- [ ] Active event intervals can be overlaid on an observation timeline.
-- [ ] A missing or uncertain start date is visible as uncertainty.
-- [ ] Free-text event notes are not interpreted as medical facts automatically.
-
 ## H4 — Documents and provenance
 
 - [ ] Source documents are copied or referenced without modification.
@@ -106,6 +106,8 @@ The fixture contains synthetic records for:
 - [ ] Reports distinguish source facts, derived calculations, and interpretations.
 - [ ] The same snapshot and template version produce deterministic factual sections.
 - [ ] Auto-generated reports stay within `90 Auto/Health`.
+- [ ] The new `health` writer category (`90 Auto/Health`, overwrite allowed) is enforced by the same allowlist and path-validation tests as the existing categories, and `AGENTS.md` invariant 2 is revised in the same change.
+- [ ] The vault-replication decision (H5-P1 in `PRIVACY.md` §10) is made and applied before the first real-data report is delivered; until then `90 Auto/Health` is excluded from every vault sync mechanism.
 - [ ] Interpretive drafts use `00 Inbox/AI Drafts` and are created as new files only.
 
 ## H6 — AI interpretation and validation trail

@@ -82,14 +82,15 @@ Cairn側には生成レポートやソース記述を既存のnote経路で索�
 
 ### H-D3: 原値と正規化値を両方保持する
 
-単位換算や項目名マッピングは誤り得るため、次を必ず残す。
+単位換算や項目名マッピングは誤り得るため、次を必ず残す
+（列名は`DATA_MODEL.md` observations表に一致させる）。
 
-- original_metric
-- original_value
-- original_unit
-- canonical_metric
-- normalized_value
-- normalized_unit
+- original_metric（原項目名）
+- original_value（原値）
+- original_unit（原単位）
+- metric_id（canonical metric。不明ならNULL）
+- value_num / value_text（正規化値）
+- unit（正規単位）
 - mapping_version
 
 ### H-D4: FHIR風の意味論を採用するが、FHIR完全実装はしない
@@ -113,14 +114,22 @@ AIや本人の解釈を上書きしない。新しい分析が古い分析を置
 健康ツールは既定で無効とする。明示設定時のみ公開し、返却件数・期間・項目数を制限する。
 原本ファイルや全履歴を無条件でモデルへ送信しない。
 
-### H-D7: Obsidian書き込みは既存allowlistを越えない
+### H-D7: Obsidian書き込み可能領域を拡大しない（ただしallowlistエントリ追加は必要）
 
 MVPでは次だけを使う。
 
 - `90 Auto/Health/` — current status、timeline、data quality、lab trends
 - `00 Inbox/AI Drafts/` — 人間が採否を決める分析草案
 
-新しい`40 Reviews/Health`を必要とする場合は、別Decisionとallowlist変更を先に行う。
+`90 Auto/Health/`は既存の`90 Auto`ツリー内であり書き込み可能領域は広がらないが、
+現行`obsidian_writer.py`はファイル名にパス区切りを許さないため、**実装時は第4カテゴリ
+`"health": ("90 Auto/Health", overwrite=True)`のallowlist追加が必要**。同じ変更で
+AGENTS.md不変条件2（「allowlist 3箇所」）を改訂し、既存カテゴリと同じパス検証・
+シンボリックリンク拒否テストを`health`カテゴリにも適用する（H5で実施。H0/H1では
+Obsidianへ書かない）。
+
+新しい`40 Reviews/Health`のような`90 Auto`ツリー外の書き込み先を必要とする場合は、
+別Decisionを先に行う。
 
 ## 4. コンポーネント
 
@@ -201,10 +210,10 @@ creatinine:
 
 ### 4.5 Cairn integration
 
-H4以降で、生成済みMarkdownをObsidian connector経由で通常のnoteとして索引する。
+H5以降で、生成済みMarkdownをObsidian connector経由で通常のnoteとして索引する。
 健康ストアを`items`へ1サンプルずつ登録しない。
 
-H5のMCP候補:
+H7のMCP候補:
 
 - `health_get_current_status`
 - `health_get_timeline`
@@ -230,7 +239,8 @@ H5のMCP候補:
 ### 5.2 血液検査
 
 H1では既存スプレッドシートから手動exportしたCSVを正式入力とする。
-シートAPIによるread-only同期はH2で追加する。
+シートAPIによるread-only同期は後続フェーズ（H8の運用改善以降）で検討する。
+月1回以下の手動exportでH-S7は満たせるため、MVPの依存を増やさない。
 
 横持ち形式（日付が列）を、1観測1行の縦持ち形式へ変換する。
 基準範囲は検査日ごとに保持し、グローバルな基準値で上書きしない。
@@ -273,12 +283,15 @@ cairn health import apple-export FILE
 cairn health import events FILE
 cairn health import document FILE
 cairn health status
+cairn health report labs
 cairn health report current
 cairn health report visit-brief --since 2025-01-01
 cairn health doctor
 ```
 
-H1では`init`、`import labs-csv`、`status`だけを実装する。
+H0では`init`と`doctor`を、H1では`import labs-csv`、`status`、`report labs`
+（factual lab summary。ACCEPTANCE H1の決定的Markdownレポート）を実装する。
+残りのコマンドは各後続フェーズで追加する。
 既存CLIへ統合する前に、healthモジュール単体でテスト可能にする。
 
 ## 8. 非目標
