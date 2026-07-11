@@ -132,6 +132,13 @@ Cairn は Karakeep/Zotero/Obsidian に対して**読み取り専用**。原本�
 - CLI ログ同期は FastAPI サーバ内の60秒ポーリングと launchd 毎時 `cairn sync all` の両方から走る。片方への一本化案（外部レビュー 2026-07-10 指摘 3.5）は、60秒側を消すと即時性を、毎時側から conversations を外すとサーバ停止時のフォールバックを失うため不採用。
 - 代わりに両経路を DB 隣のサイドカーファイルへの `flock` で直列化する（`threading.Lock` はプロセス内のみ有効）。重複実行の実害（import_runs の重複行・SQLite write contention）はロックで消え、後着側は file_state 比較により no-op で抜ける。
 
+### D13: 健康ドメインは独立ストア（Personal Health Observatory）として追加する — 採用（v1.3 追加、ADR-0005）
+
+- 検査値・Apple Health 等の健康時系列は `cairn.db` に入れない。独立した health data home（`~/Library/Application Support/Cairn/health/`、分析ストアは DuckDB 予定・H0 で依存レビュー）で raw / normalized / derived / interpretation を分離管理する。高頻度サンプルを items/chunks へ 1 件ずつ登録しない。
+- Cairn 本体は統合・検索層として、承認済みレポートの索引（Obsidian connector 経由の通常 note）と、オプトイン・bounded な MCP 供給のみを担う。health MCP は既定無効。
+- Obsidian への配信先は既存 `90 Auto` ツリー内の `90 Auto/Health/`（allowlist 第4カテゴリとして H5 で追加、不変条件2を同時改訂）と `00 Inbox/AI Drafts/` のみ。Vault 複製は既定除外（docs/health/PRIVACY.md の H5-P1）。
+- 詳細設計・privacy 境界・受け入れ基準・ロードマップ（H0〜H9）の正典は `docs/adr/0005-personal-health-observatory.md` と `docs/health/`。長期方向は `docs/NORTH_STAR.md`（Human Validation Platform。実装上の正典は引き続き本文書）。
+
 ---
 
 ## 3. アーキテクチャ
@@ -456,6 +463,15 @@ CREATE TABLE sync_state (
 ---
 
 ## 11. 改訂記録
+
+### v1.3（2026-07-11）
+
+健康ドメインの追加を批准。既存アーキテクチャは不変（`cairn.db` 非接触）。
+
+- D13: Personal Health Observatory を独立ストアとして追加（ADR-0005 Accepted）。
+  設計文書一式は docs/health/、北極星は docs/NORTH_STAR.md
+- AGENTS.md に健康データ境界の不変条件 9 を追加、.gitignore に健康アーティファクトの
+  除外パターンを追加
 
 ### v1.2（2026-07-10）
 

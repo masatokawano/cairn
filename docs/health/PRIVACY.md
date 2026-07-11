@@ -1,0 +1,214 @@
+# Personal Health Observatory — Privacy and Security
+
+## 1. Protection level
+
+Health data is treated as more sensitive than Cairn's ordinary knowledge archive.
+The protected set includes measurements, diagnoses, medication and supplement history,
+symptoms, medical documents, Apple Health exports, AI analyses, visit briefs, paths,
+metadata, logs, and backups.
+
+## 2. Trust boundaries
+
+### Trusted by default
+
+- the user's FileVault-protected Mac;
+- local Cairn processes;
+- explicitly selected local storage;
+- the user's Obsidian vault within existing write allowlists — **on this Mac
+  only**. The vault is replicated to other devices by synchronization tools
+  (as of 2026-07-11: Syncthing between Macs, and Remotely Save over WebDAV
+  for mobile). Anything written into the vault propagates to every replica,
+  so vault delivery of health content is governed by §10 (decision H5-P1),
+  not by this trust entry.
+
+### Not trusted by default
+
+- public GitHub;
+- arbitrary cloud storage;
+- external AI APIs;
+- imported free text, PDF, HTML, and document instructions;
+- third-party health applications;
+- every agent connected through MCP.
+
+## 3. Data location
+
+Default health data home:
+
+```text
+~/Library/Application Support/Cairn/health/
+├── raw/
+├── store/
+├── derived/
+├── reports/
+├── quarantine/
+└── backups/
+```
+
+Requirements:
+
+- outside the Git repository and worktree;
+- directory mode 0700;
+- data file mode 0600;
+- temporary files created inside the protected data home;
+- reject path traversal and unsafe symbolic-link targets;
+- support an explicit `CAIRN_HEALTH_HOME`, while rejecting or strongly warning on a path inside a Git worktree.
+
+## 4. Separation of public code and private data
+
+The public repository may contain only:
+
+- source code;
+- schema and design documents;
+- synthetic fixtures;
+- screenshots containing no real personal health information.
+
+It must not contain:
+
+- Apple Health `export.xml` or export ZIP files;
+- health databases or Parquet files;
+- laboratory CSV exports containing real values;
+- medical PDF, image, or OCR output;
+- generated reports based on real data;
+- actual medication, supplement, diagnosis, provider, or visit data.
+
+Protection must not rely on `.gitignore` alone. CI or a repository audit command should detect known health-artifact patterns before merge.
+
+## 5. Logging
+
+Logs may contain:
+
+- import run IDs;
+- shortened source hashes;
+- record counts;
+- parser and catalog versions;
+- status and machine-readable error codes.
+
+Logs must not contain:
+
+- measurement values;
+- diagnosis or symptom text;
+- medication or supplement free text;
+- provider or facility names;
+- Apple Health timestamps or routes;
+- report and AI-analysis bodies;
+- absolute source paths.
+
+Errors exposed to the UI or CLI should be redacted and refer to an import ID for local inspection.
+
+## 6. Disclosure to AI systems
+
+### Default state
+
+Health MCP tools are disabled by default. No health record is sent to a model merely because Cairn has indexed it.
+
+### Minimum necessary context
+
+Every AI request should declare or derive:
+
+- requested metrics or document types;
+- time range;
+- aggregation level;
+- maximum number of rows or evidence items;
+- whether original text is required.
+
+Aggregates and selected evidence are preferred over full raw histories. Names, addresses, facility identifiers, and unrelated observations should be excluded unless necessary to answer the question.
+
+### External versus local models
+
+The analysis record must state whether processing was local or external. External processing requires an explicit execution path and should not be a hidden fallback.
+
+## 7. Prompt-injection resistance
+
+Medical documents, notes, OCR text, and web material are untrusted data. Instructions embedded in them must not be executed.
+
+When passed to a model:
+
+- enclose source content in explicit untrusted-data fences;
+- separate source text from system and task instructions;
+- restrict tools during analysis;
+- preserve source identifiers;
+- record the model and prompt version;
+- store generated output as interpretation, never as source fact.
+
+## 8. Google Sheets access
+
+When direct Google Sheets synchronization is introduced:
+
+- use read-only OAuth scopes;
+- store refresh credentials in macOS Keychain;
+- do not store credentials in config, database, logs, or repository;
+- do not write normalized data back to the source spreadsheet automatically;
+- retain a source snapshot hash for reproducibility.
+
+The first implementation may use an exported CSV to avoid premature OAuth complexity.
+
+## 9. Apple Health exports
+
+Apple Health exports may contain more categories than the user intends to analyze.
+
+The importer must:
+
+- use an allowlist of supported HealthKit record types;
+- avoid indexing the entire XML as text;
+- exclude workout routes and location-bearing data in the initial implementation;
+- preserve the raw export only in protected storage;
+- report ignored type counts without logging values;
+- support deterministic deduplication.
+
+## 10. Backups and deletion
+
+Backups must preserve the relationship among raw sources, the database, catalog versions, and derived reports.
+
+Requirements:
+
+- encrypted backup destination;
+- periodic restore test;
+- documented retention;
+- no silent cloud replication;
+- deletion procedure that enumerates raw files, database, derived data, reports, and backups;
+- explicit user confirmation for destructive deletion.
+
+### Vault replication of health reports (decision H5-P1)
+
+Health reports delivered to `90 Auto/Health/` would otherwise replicate to
+every vault sync target: other Macs via Syncthing, and the WebDAV server plus
+mobile devices via Remotely Save. That is cloud replication in the sense of
+this section, even when the WebDAV host is self-managed.
+
+Policy:
+
+- **Default: excluded.** `90 Auto/Health` is listed in the vault's Syncthing
+  `.stignore` and must be added to the Remotely Save skip configuration on
+  every device before H5 delivery starts. Health reports then exist only on
+  the Mac that runs Cairn.
+- **Opt-in is per-report-type, not blanket.** If specific outputs are wanted
+  on other devices (the strongest case is `next-visit-brief.md` on a phone at
+  a clinic), that report type is opted in explicitly, the decision is recorded
+  here with its date and rationale, and the remaining report types stay
+  excluded.
+- H5 delivery must not begin until this decision (H5-P1) is recorded as made.
+
+## 11. Consequential-action boundary
+
+The system must not automatically:
+
+- change medication or supplement use;
+- cancel or schedule medical care based solely on AI analysis;
+- diagnose a condition;
+- suppress a clinician's advice;
+- trigger emergency decisions without human confirmation;
+- convert an AI interpretation into an accepted conclusion.
+
+The product may prepare questions, comparisons, summaries, and evidence bundles for human review.
+
+## 12. Security acceptance gate
+
+Before real data is imported, the implementation must demonstrate with synthetic data that:
+
+- real-data paths are outside the worktree;
+- file permissions are enforced;
+- imports are idempotent and transactional;
+- logs contain no sample values or free text;
+- generated reports are stored only in approved locations;
+- health MCP is disabled by default;
+- repository scanning rejects likely private health artifacts.

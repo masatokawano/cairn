@@ -8,3 +8,13 @@ frontend/dist/
 temp/
 brainsync/config.env
 brainsync/state/
+
+# Personal Health Observatory (ADR-0005): real health artifacts must never
+# enter the repository. Defense in depth only — the data home lives outside
+# the worktree, and an H0 audit command backs this up (PRIVACY.md §4).
+export.xml
+export.zip
+apple_health_export*
+*.duckdb
+health*.csv
+*visit-brief*.md

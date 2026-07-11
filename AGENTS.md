@@ -48,6 +48,12 @@ Cairn — AI 会話アーカイブを核に、Karakeep（発見）/ Zotero（根
    launchd の load/unload、`git push`、タグ操作。承認済み計画の中に含まれていても、実行直前に
    対象を示して確認する。それ以外の可逆操作（コード編集・テスト実行・ローカル commit の準備）は
    承認済み計画の範囲内なら確認なしで進めてよい。
+9. **健康データ境界（ADR-0005 / DESIGN.md D13）**: 実健康データ（検査値・Apple Health
+   export・医療文書・実データ由来レポート）をリポジトリ・テストフィクスチャ・ログ・
+   コミット・PR に入れない（テストは合成データのみ）。health ストアは `cairn.db` から
+   独立させ、health data home は Git worktree 外に置く。health MCP は既定無効。
+   Obsidian への健康レポート配信は allowlist（`90 Auto/Health` は H5 で追加）と
+   docs/health/PRIVACY.md の複製決定 H5-P1 に従う。
 
 ## コマンド
 
