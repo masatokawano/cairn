@@ -200,21 +200,23 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 
 ## 4. 血液検査の横持ち変換
 
+以下は実在の検査履歴と一致しない、完全な合成例である。
+
 入力:
 
-| 項目 | 単位 | 2025-10-16 | 2026-06-06 |
+| 項目 | 単位 | 2031-02-03 | 2031-08-19 |
 |---|---|---:|---:|
-| Example-A | U/L | 14 | 17 |
-| Example-B | mg/dL | 0.88 | 0.89 |
+| Synthetic-A | arb-U/L | 11 | 23 |
+| Synthetic-B | arb-mg/dL | 1.23 | 1.19 |
 
 出力:
 
 | metric | observed_date | value | unit |
 |---|---|---:|---|
-| example_a | 2025-10-16 | 14 | U/L |
-| example_a | 2026-06-06 | 17 | U/L |
-| example_b | 2025-10-16 | 0.88 | mg/dL |
-| example_b | 2026-06-06 | 0.89 | mg/dL |
+| synthetic_a | 2031-02-03 | 11 | arb-U/L |
+| synthetic_a | 2031-08-19 | 23 | arb-U/L |
+| synthetic_b | 2031-02-03 | 1.23 | arb-mg/dL |
+| synthetic_b | 2031-08-19 | 1.19 | arb-mg/dL |
 
 ## 5. バージョニング
 
