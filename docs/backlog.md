@@ -1,6 +1,6 @@
 # Cairn 作業候補（backlog）
 
-最終更新: 2026-07-10
+最終更新: 2026-07-11
 
 **今なにをすべきかの正典は DESIGN.md §7（マイルストーン）**。本ファイルはマイルストーン外の
 細かい作業候補の置き場。現況の詳細な棚卸し・残課題・拡張設計は
@@ -18,6 +18,10 @@
 - 2026-07-10: 外部レビュー第1段階の修正6件を反映（weekly 対象週ルール / Karakeep full sweep
   自動昇格 + prune / MCP title フェンス + meta ホワイトリスト / 会話同期の flock 直列化 =
   D12 / README 実態化）。DESIGN.md は v1.2
+- 2026-07-11: 健康ドメイン批准 + H0/H1 実装（ADR-0005 / DESIGN.md v1.3 D13 / 凍結例外）。
+  `backend/app/health/`（独立 DuckDB ストア、labs CSV 縦切り、init/doctor/import/status/
+  report labs）、テスト 38 件追加で **553 passed**。cairn.db 非接触。
+  残: 実データ検証（ACCEPTANCE 末尾の人間手順）→ H2 イベント台帳
 
 ## 採用基準
 
