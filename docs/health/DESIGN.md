@@ -1,9 +1,10 @@
 # Personal Health Observatory — Design
 
-- ステータス: Proposal
+- ステータス: Accepted（ADR-0005、2026-07-11 批准）
 - 作成日: 2026-07-11
 - 対象: Cairnへの健康領域追加
-- 正典との関係: `docs/DESIGN.md`を変更する前の設計提案。採用にはADR-0005の承認が必要。
+- 正典との関係: 健康ドメインの設計正典。root `docs/DESIGN.md` には D13 として登録済み。
+  矛盾したら root DESIGN.md と ADR-0005 が優先。
 
 ## 1. 成功基準
 

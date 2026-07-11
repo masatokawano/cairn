@@ -1,6 +1,6 @@
 # ADR-0005: Add the Personal Health Observatory as an independent domain store
 
-- Status: Draft
+- Status: Accepted (2026-07-11, repository owner; effective on merge of the design branch)
 - Date: 2026-07-11
 - Decision owner: Repository owner
 - Related documents:
