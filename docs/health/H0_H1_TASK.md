@@ -23,7 +23,7 @@ The broader direction is defined in `docs/NORTH_STAR.md`, but this implementatio
 8. `docs/health/PRIVACY.md`
 9. `docs/health/ACCEPTANCE.md`
 10. `docs/health/ROADMAP.md`
-11. `docs/adr/ADR-0005-personal-health-observatory-draft.md`
+11. `docs/adr/0005-personal-health-observatory.md`
 
 If these documents conflict, stop before implementation and report the exact conflict with a proposed documentation change.
 

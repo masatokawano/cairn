@@ -65,12 +65,14 @@ Health MCP tools, when introduced, will be disabled by default and will enforce 
 
 ### 6. Preserve existing write boundaries
 
-The MVP will not expand Obsidian write locations beyond existing allowlists. Proposed health outputs will use:
+The MVP will not expand the writable area of the Obsidian vault beyond the existing `90 Auto` and `00 Inbox/AI Drafts` trees. Proposed health outputs will use:
 
 - `90 Auto/Health/` for reproducible generated reports;
 - `00 Inbox/AI Drafts/` for new interpretive drafts.
 
-Any additional write target requires a separate decision and tests.
+Note that `90 Auto/Health/` still requires an implementation change: the current `obsidian_writer.py` rejects path separators in filenames, so delivery (H5) adds a fourth allowlist category `"health" → ("90 Auto/Health", overwrite allowed)`, revises `AGENTS.md` invariant 2 in the same change, and extends the existing path-validation and symlink-rejection tests to the new category. The writable area does not grow; the allowlist entry count does.
+
+Any write target outside those trees requires a separate decision and tests.
 
 ### 7. Delay generic framework extraction
 
@@ -128,6 +130,7 @@ Rejected as the target architecture. A separate store is desirable, but retrieva
 5. Implement H0 and H1 without changing production `cairn.db`.
 6. Require independent review before adding MCP or expanding Obsidian writes.
 7. Document backup and restore before routine real-data operation.
+8. At H5, add the `health` category to the `obsidian_writer.py` allowlist with tests, revise `AGENTS.md` invariant 2 accordingly, and resolve vault-replication decision H5-P1 (`docs/health/PRIVACY.md` §10) before the first real-data report is delivered.
 
 ## Validation plan
 
