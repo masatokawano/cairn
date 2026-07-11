@@ -66,7 +66,7 @@ status doc §5.1 の詳細参照。
 | C5 | 添付 download API + viewer UI | S |
 | C6 | `admin` CLI の `cairn admin` への統合（§5.7 M6 検討事項） | M |
 | C7 | 複数 Mac の claude/codex ログ集約（端末 ID 付き staging 方式。外部レビュー §4.1） | M |
-| C8 | Obsidian Vault の複数端末同期方式を運用文書に明記（外部レビュー §4.2） | XS |
+| C8 | ✅ 決定（2026-07-11）: Vault 同期は **Syncthing**（Mac 間双方向）+ 受信専用レプリカ（iPhone）。iCloud Drive は不採用 — vault は D9 により TCC 保護ディレクトリ外（`~/Obsidian`）に置く前提で、iCloud に移すと launchd の headless ジョブが TCC 権限プロンプトを出せず D9 の意図（`/bin/bash` の FDA 廃止）に逆戻りする上、オンデマンドダウンロードで未実体化ファイルを索引する恐れがあるため。Cairn 側のコード・設定は無変更（`CAIRN_OBSIDIAN_VAULT` は `~/Obsidian` のまま） | XS |
 
 ## D. Decision Record / DESIGN.md 改訂が必要な拡張
 
