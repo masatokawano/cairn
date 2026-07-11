@@ -18,3 +18,8 @@ sentence-transformers>=3.0
 # A NumpyIndex fallback exists for environments where extension loading is
 # disabled (rare on Apple Silicon, common on managed Linux).
 sqlite-vec>=0.1.6
+# H0 (ADR-0005): Personal Health Observatory analytical store. Prebuilt
+# wheels on macOS arm64; imported lazily so the rest of the app never pays.
+duckdb>=1.5
+# H0: health metric catalog files (app/health/catalog/*.yml).
+pyyaml>=6.0

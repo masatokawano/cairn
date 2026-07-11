@@ -1,0 +1,7 @@
+mapping_version: "test-1"
+
+aliases:
+  Synthetic-A: synthetic_a
+  Synthetic-B: synthetic_b
+  Synthetic-C: synthetic_c
+  Synthetic-D: synthetic_d
