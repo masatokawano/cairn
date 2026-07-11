@@ -1,54 +1,60 @@
 # Cairn North Star — Human Validation Platform
 
-- Status: Proposal
-- Date: 2026-07-11
-- Scope: Long-term product and research direction
-- Relationship to `docs/DESIGN.md`: This document states purpose and direction. `docs/DESIGN.md` remains the implementation authority.
+- ステータス: Proposal
+- 作成日: 2026-07-11
+- 対象: Cairnの長期的なプロダクト／研究方向
+- `docs/DESIGN.md`との関係: 本文書は目的と方向を示す。実装上の正典は引き続き`docs/DESIGN.md`とする。
 
-## 1. The north star
+## 1. 北極星
 
-Cairn exists to help a person preserve not merely what they have seen or thought, but **how their understanding changes under evidence**.
+Cairnが保存すべきものは、見たものや考えたことだけではない。
 
-Its long-term destination is a **Human Validation Platform**: a personal, longitudinal system that makes observations, interventions, outcomes, interpretations, decisions, and evidence inspectable across years.
+**証拠に照らして、自分の理解がどのように変化したか**を保存する。
 
-Cairn should help answer questions such as:
+Cairnの長期的な到達点を、**Human Validation Platform**と定義する。
+これは、観測、介入、結果、解釈、意思決定、根拠、修正履歴を、年単位・十年単位で検証可能にする個人用の長期基盤である。
 
-- What did I believe at the time, and why?
-- What changed after an intervention or new evidence?
-- Which conclusions remained stable, and which were revised?
-- Which claims are supported by measurements, documents, or experiments?
-- What remains uncertain or untested?
-- What should be observed next to reduce uncertainty?
+Cairnは、次の問いに答えられることを目指す。
 
-The goal is not to accumulate an ever-larger archive. The goal is to make knowledge **revisable, testable, and useful in action**.
+- その時点で何を信じ、何を根拠としていたか。
+- 介入や新しい証拠の後に何が変わったか。
+- どの結論が維持され、どの結論が修正されたか。
+- ある主張は、測定、文書、実験のどれに支えられているか。
+- 何が未確認で、何が依然として不確実か。
+- 不確実性を減らすために、次に何を観測すべきか。
 
-## 2. Why this matters in the AI era
+目的は、アーカイブを無限に大きくすることではない。
 
-Generative AI makes plausible explanations and working artifacts abundant. Scarcity shifts away from production and toward validation.
+知識を、**修正可能で、検証可能で、行動に使える状態に保つこと**である。
 
-The limiting questions become:
+## 2. AI時代にValidationが重要になる理由
 
-- Is this claim grounded?
-- Is this result reproducible?
-- Did the intervention actually work?
-- Does the conclusion survive new evidence?
-- Can another model or person inspect the reasoning trail?
-- Are fact, inference, hypothesis, and decision clearly separated?
+生成AIによって、もっともらしい説明、文章、コード、計画、分析は大量かつ高速に作れるようになる。
 
-A system that only remembers content is insufficient. An AI-era external brain must also remember **provenance, change, uncertainty, and test outcomes**.
+希少になるのは生成能力ではなく、検証能力である。
 
-Cairn therefore evolves from an archive and retrieval engine into a platform for longitudinal validation.
+- その主張は何に基づいているか。
+- その結果は再現できるか。
+- 介入は本当に効果を持ったか。
+- 新しい証拠が出ても結論は維持されるか。
+- 別のモデルや人間が経緯を点検できるか。
+- 事実、推論、仮説、判断が分離されているか。
 
-## 3. The universal validation loop
+内容を記憶するだけの外部脳では不十分になる。
+AI時代の外部脳は、**provenance、変化、不確実性、検証結果**も記憶しなければならない。
 
-Across health, research, software, security, learning, and decision-making, the same basic structure recurs:
+そのためCairnは、アーカイブ兼検索システムから、長期的なValidationの基盤へ進化する。
+
+## 3. 普遍的なValidation loop
+
+健康、研究、ソフトウェア、セキュリティ、学習、意思決定には、共通する基本構造がある。
 
 ```text
 Observation
     ↓
-Question or hypothesis
+Question / Hypothesis
     ↓
-Intervention, experiment, or decision
+Intervention / Experiment / Decision
     ↓
 Outcome
     ↓
@@ -56,171 +62,187 @@ Interpretation
     ↓
 Validation against evidence
     ↓
-Revision, continuation, or rejection
+Revision / Continuation / Rejection
 ```
 
-This loop is not assumed to be clean or causal. Cairn must preserve ambiguity:
+ただし、現実の経過がこの順序どおりに明確であるとは仮定しない。
 
-- observations can be incomplete;
-- interventions can overlap;
-- outcomes can have multiple explanations;
-- interpretations can conflict;
-- evidence can be weak or stale;
-- a conclusion can remain unresolved.
+- 観測は欠けていることがある。
+- 複数の介入が重なることがある。
+- 結果には複数の説明があり得る。
+- 解釈は互いに対立し得る。
+- 証拠は弱い、古い、不完全な場合がある。
+- 結論を出さず保留すべき場合がある。
 
-The platform should make these limitations visible rather than compressing them into false certainty.
+Cairnは、これらの曖昧さを虚偽の確実性へ圧縮せず、見える状態に保つ。
 
-## 4. Domains
+## 4. 将来のドメイン
 
-The platform may eventually support several domains sharing the same validation primitives.
+Human Validation Platformは、同じValidation原則を共有する複数のドメインへ展開し得る。
 
 ```text
 Cairn
-├── Knowledge     what was encountered and understood
-├── Health        measurements, interventions, outcomes, clinical context
-├── Research      questions, sources, hypotheses, analyses, findings
-├── Software      requirements, changes, tests, incidents, regressions
-├── Security      assets, controls, attacks, evidence, assurance results
-├── Decisions     options, assumptions, choices, consequences
-├── Learning      goals, practice, assessment, retained capability
-└── Life          meaningful events and longitudinal personal context
+├── Knowledge     発見したもの、理解したこと、根拠
+├── Health        測定、介入、結果、医療上の文脈
+├── Research      問い、資料、仮説、分析、知見
+├── Software      要件、変更、テスト、障害、回帰
+├── Security      資産、対策、攻撃、証跡、保証結果
+├── Decisions     選択肢、前提、決定、帰結
+├── Learning      目標、練習、評価、定着した能力
+└── Life          重要な出来事と長期的な個人文脈
 ```
 
-These are not required to share one physical database. They share a conceptual validation model, provenance rules, and retrieval interface.
+これらを一つの物理データベースへ押し込む必要はない。
+共有するのは、Validationの概念、provenanceの規則、検索・提示のインターフェースである。
 
-## 5. Why Health is the first proving ground
+## 5. Healthを最初の実証領域にする理由
 
-Health is the first major domain because it exposes nearly every hard problem early:
+Healthは、難しい問題の大半を早い段階で露出させる。
 
-- long-term quantitative time series;
-- heterogeneous source systems;
-- interventions with uncertain causal effects;
-- strict separation between measurement and interpretation;
-- sensitive data requiring strong privacy boundaries;
-- professional explanations alongside personal and AI analysis;
-- the need to revisit earlier conclusions after later tests;
-- practical outputs such as a visit brief or longitudinal trend review.
+- 長期間の定量時系列
+- 異なる形式・粒度のデータソース
+- 因果関係を簡単には断定できない介入と結果
+- 測定事実と解釈の厳密な分離
+- 強いプライバシー境界
+- 医師の説明、本人の理解、AI分析の共存
+- 後の検査結果による過去の解釈の再評価
+- 受診用要約や長期推移分析といった実用的な出力
 
-The Personal Health Observatory is therefore not a side feature. It is the first serious implementation of the Human Validation Platform model.
+Personal Health Observatoryは付加機能ではない。
+Human Validation Platformを初めて本格実装するproving groundである。
 
-Its purpose is not automated diagnosis. Its purpose is to preserve what was measured, what changed, what was done, how the change was interpreted, and what evidence supports that interpretation.
+目的は自動診断ではない。
+何が測定され、何を行い、何が変化し、どう理解され、その理解が何に支えられているかを保存することである。
 
-## 6. Relationship to Validation Science
+## 6. Validation Scienceとの関係
 
-Validation Science asks how claims, systems, models, and interventions should be tested under real-world complexity, especially when AI accelerates both creation and error.
+Validation Scienceは、AIによって生成と誤りが同時に加速する環境で、主張、システム、モデル、介入をどのように検証すべきかを問う。
 
-Cairn can serve as a personal-scale experimental substrate for this broader research direction.
+Cairnは、この研究方向を個人規模で実験する基盤になり得る。
 
-The health domain validates questions such as:
+Health領域では、たとえば次の問いを実装として検証できる。
 
-- How should facts, derived metrics, and interpretations be separated?
-- How can AI analyses remain inspectable after models change?
-- How should contradictory interpretations coexist?
-- What evidence is sufficient to change an accepted conclusion?
-- How can longitudinal context be supplied without exposing unnecessary data?
-- How can automated analysis remain useful without becoming an authority?
+- 事実、派生値、解釈をどのように分離すべきか。
+- モデル世代が変わってもAI分析を点検可能にするには何が必要か。
+- 競合する複数の解釈をどのように共存させるか。
+- どの程度の証拠があれば、受け入れた結論を更新すべきか。
+- 長期文脈を供給しながら、不要な個人情報を開示しないにはどうするか。
+- AI分析を有用にしつつ、権威化させないためにどの境界が必要か。
 
-The software and security domains can later extend the same ideas toward Continuous Validation and Continuous Cyber Assurance.
+将来、SoftwareとSecurityの領域では、同じ思想をContinuous ValidationやContinuous Cyber Assuranceへ展開できる。
 
-## 7. Product principles
+## 7. プロダクト原則
 
-### 7.1 Preserve originals
+### 7.1 原本を保存する
 
-Original conversations, documents, measurements, exports, and source references must remain recoverable. Derived indexes and summaries must be rebuildable.
+会話、文書、測定、エクスポート、参照先を回収可能な状態で残す。
+索引、要約、派生値は再構築可能にする。
 
-### 7.2 Separate fact from interpretation
+### 7.2 事実と解釈を分離する
 
-A measured value, a source quotation, an inferred relationship, a hypothesis, and a decision are different object types. The system must not collapse them into a single narrative record.
+測定値、原文引用、推論、仮説、意思決定は別の種類の情報である。
+一つの滑らかな物語へ混ぜない。
 
-### 7.3 Make provenance first-class
+### 7.3 Provenanceを第一級にする
 
-Every important conclusion should identify the observations, documents, events, and analyses on which it depends.
+重要な結論から、参照した観測、文書、イベント、分析へ遡れるようにする。
 
-### 7.4 Preserve revision history
+### 7.4 修正履歴を保存する
 
-New interpretations supersede or challenge old ones; they do not silently overwrite them. The platform should make intellectual change visible.
+新しい解釈は古い解釈を無言で上書きしない。
+何が、どの証拠によって、どう変わったかを見える状態にする。
 
-### 7.5 Prefer retrieval-time synthesis over premature certainty
+### 7.5 早すぎる確定よりretrieval-time synthesisを優先する
 
-The system should avoid freezing large amounts of speculative structure in advance. Retrieve relevant originals and structured observations, then synthesize for the current question with explicit provenance.
+大量の推測的構造を事前生成して固定しない。
+問いに応じて原本と構造化観測を取得し、provenance付きでその時点の合成を行う。
 
-### 7.6 Use domain-appropriate stores
+### 7.6 ドメインに適したストアを使う
 
-Conversation search, high-frequency health time series, documents, and analytical outputs need not share one storage engine. Cairn is the integration and validation layer, not a demand that all data become one table.
+会話検索、高頻度時系列、文書、分析成果物は、同じストレージエンジンである必要はない。
+Cairnは統合層・Validation層であり、全データを一つのテーブルへ入れることを目的としない。
 
-### 7.7 Local-first and minimum disclosure
+### 7.7 Local-firstとminimum disclosure
 
-Private longitudinal data should remain local by default. AI context should be bounded to the minimum data necessary for the specific question.
+個人の長期データは原則ローカルに置く。
+AIへ渡す情報は、現在の問いに必要な最小範囲に制限する。
 
-### 7.8 Human authority over consequential conclusions
+### 7.8 重大な結論の最終権限は人間が持つ
 
-AI can summarize, compare, propose hypotheses, and expose inconsistencies. It must not silently convert analysis into diagnosis, treatment, policy, or irreversible action.
+AIは、要約、比較、仮説提示、不整合の発見を行える。
+診断、治療、政策、不可逆操作を自動確定してはならない。
 
-### 7.9 Useful outputs over ontological perfection
+### 7.9 Ontologyの完成より有用な出力を優先する
 
-The platform should produce concrete value: a weekly review, a research context pack, a health timeline, a visit brief, a change-impact report. It should not delay usefulness while attempting to model all human knowledge.
+週次レビュー、研究context pack、健康タイムライン、受診用brief、変更影響レポートなど、具体的な価値を先に作る。
+人間の知識全体を完全にモデル化しようとして有用性を遅らせない。
 
-## 8. Core validation objects
+## 8. 中核となるValidation object
 
-The exact schema may differ by domain, but Cairn should converge on a small set of conceptual objects:
+ドメインごとのschemaは異なってよいが、次の概念を共通語彙として育てる。
 
-- **Observation** — a recorded fact, measurement, event, or source statement.
-- **Question** — an uncertainty that motivates retrieval or analysis.
-- **Hypothesis** — a provisional explanation or prediction.
-- **Intervention** — an action intended to change or test something.
-- **Outcome** — what occurred after an intervention, experiment, or passage of time.
-- **Interpretation** — a human, professional, or AI explanation of observations.
-- **Evidence set** — the explicit records used to support, contextualize, or limit an interpretation.
-- **Decision** — a chosen action with assumptions and expected consequences.
-- **Validation result** — the extent to which later evidence supports, weakens, contradicts, or leaves unresolved a claim or intervention.
-- **Revision** — a traceable change to an earlier interpretation, hypothesis, or decision.
+- **Observation** — 測定、出来事、文書上の記述など、記録された事実。
+- **Question** — 検索や分析を必要とする不確実性。
+- **Hypothesis** — 暫定的な説明または予測。
+- **Intervention** — 状態を変える、または仮説を試すための行動。
+- **Outcome** — 介入、実験、時間経過の後に起きたこと。
+- **Interpretation** — 観測に対する本人、専門家、AIの説明。
+- **Evidence set** — 解釈を支え、制約し、文脈化する明示的な記録集合。
+- **Decision** — 前提と期待される帰結を伴う選択。
+- **Validation result** — 後の証拠が主張や介入を支持、弱化、反証、または未解決とした状態。
+- **Revision** — 過去の解釈、仮説、判断に対する追跡可能な変更。
 
-These are conceptual contracts, not a mandate for one universal database schema.
+これは一つの万能schemaを今すぐ作るという意味ではない。
+各ドメインの実装から、実際に共通化できるものを抽出するための概念契約である。
 
-## 9. What Cairn should become
+## 9. Cairnが最終的にできるべきこと
 
-In mature form, Cairn should be able to construct a bounded, provenance-rich answer to a question such as:
+成熟したCairnは、次の問いに、範囲を限定し、根拠へ遡れる形で答えられるべきである。
 
-> Show what I observed, what I believed, what I changed, what happened afterward, what evidence supports the current interpretation, and what remains uncertain.
+> 私は何を観測し、何を信じ、何を変え、その後何が起き、現在の解釈は何に支えられ、何がまだ不確実なのか。
 
-The answer may cross conversations, notes, measurements, documents, source literature, code changes, and prior analyses. It should distinguish originals from generated synthesis and make every consequential statement inspectable.
+回答は、会話、ノート、測定値、文書、論文、コード変更、過去の分析を横断し得る。
 
-## 10. What Cairn must not become
+その際、原本と生成された合成を分離し、重大な主張を点検可能にする。
 
-- a system that claims to know the person better than the person;
-- an automated medical, legal, financial, or moral authority;
-- a surveillance system that captures everything merely because it can;
-- a knowledge graph filled with unreviewed inferred relationships;
-- a cloud dependency that makes private memory inaccessible or exposed;
-- an anxiety engine that treats every deviation as a warning;
-- an archive so comprehensive that it becomes unusable;
-- a model-specific artifact that loses meaning when the current AI is replaced.
+## 10. Cairnがなってはならないもの
 
-## 11. Near-term direction
+- 本人以上に本人を理解していると主張するシステム
+- 医療、法律、財務、倫理上の自動権威
+- 取得可能だからという理由だけですべてを収集する監視基盤
+- 未確認の推論関係で満たされた知識グラフ
+- private memoryを外部クラウドへ依存させる仕組み
+- あらゆる変動を警告へ変換する不安増幅装置
+- 完全すぎて使えないアーカイブ
+- 現在のAIモデルが置換されたとき意味を失う成果物
 
-The next proving sequence is:
+## 11. 直近の進路
 
-1. Ratify the Personal Health Observatory privacy and data boundaries.
-2. Build a complete blood-test vertical slice from immutable source to normalized observations and reproducible report.
-3. Add explicit medication, supplement, and lifestyle events.
-4. Import selected Apple Health types using allowlists and deterministic deduplication.
-5. Produce provenance-rich timelines and visit briefs.
-6. Add opt-in, bounded MCP access for AI analysis.
-7. Evaluate the resulting system as an implementation of the validation loop.
+最初の実証順序は次のとおりとする。
 
-Only after the health vertical slice is reliable should the generic validation abstractions be extracted for other domains.
+1. Personal Health Observatoryのprivacyとデータ境界を確定する。
+2. 血液検査について、immutable sourceからnormalized observation、再現可能なreportまでの縦切りを完成させる。
+3. 服薬、サプリ、生活変化を明示的なeventとして追加する。
+4. Apple Healthの選択したtypeをallowlistとdeterministic deduplicationで取り込む。
+5. Provenance付きtimelineと受診用briefを生成する。
+6. AI分析用に、opt-inでboundedなMCP accessを追加する。
+7. この実装がValidation loopとして有効かを評価する。
 
-## 12. Ten-year test
+Healthの縦切りが信頼できるまでは、他ドメイン向けの汎用Validation frameworkを抽出しない。
 
-Cairn is on course if, ten years from now, it can answer important questions without pretending that the past was clearer than it was.
+## 12. 十年後のテスト
 
-It should reveal:
+十年後、Cairnが重要な問いに答えるとき、過去が実際より明確だったかのように装わないなら、北極星に近づいている。
 
-- the original records;
-- the understanding held at each point in time;
-- the interventions and decisions made;
-- the evidence that later emerged;
-- the revisions that followed;
-- the uncertainties that still remain.
+Cairnは次を示すべきである。
 
-That is the north star: **not perfect memory, but inspectable learning over time**.
+- 元の記録
+- 各時点での理解
+- 実行した介入と意思決定
+- 後から得られた証拠
+- それに伴う修正
+- 今も残る不確実性
+
+北極星は、完全な記憶ではない。
+
+**時間を通じて、学習と修正の過程を検証可能にすること**である。
