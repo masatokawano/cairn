@@ -1,0 +1,67 @@
+# Metric catalog (public medical vocabulary only — no personal data).
+# LOINC codes are attached only where confidently known (DESIGN.md health
+# §4.2: 誤ったコードを無理に付けない). Extend per-need, bump catalog_version.
+catalog_version: "2026.07"
+
+metrics:
+  creatinine:
+    label_ja: クレアチニン
+    label_en: Creatinine
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+    loinc: 2160-0
+  egfr:
+    label_ja: eGFR
+    label_en: eGFR
+    quantity_kind: rate
+    canonical_unit: mL/min/1.73m2
+  ast:
+    label_ja: AST（GOT）
+    label_en: AST
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  alt:
+    label_ja: ALT（GPT）
+    label_en: ALT
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  gamma_gtp:
+    label_ja: γ-GTP
+    label_en: Gamma-GTP
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  ldl_cholesterol:
+    label_ja: LDLコレステロール
+    label_en: LDL cholesterol
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  hdl_cholesterol:
+    label_ja: HDLコレステロール
+    label_en: HDL cholesterol
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  triglycerides:
+    label_ja: 中性脂肪
+    label_en: Triglycerides
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  glucose:
+    label_ja: 血糖
+    label_en: Glucose
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  hba1c:
+    label_ja: HbA1c
+    label_en: HbA1c
+    quantity_kind: fraction
+    canonical_unit: "%"
+  uric_acid:
+    label_ja: 尿酸
+    label_en: Uric acid
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  hemoglobin:
+    label_ja: ヘモグロビン
+    label_en: Hemoglobin
+    quantity_kind: concentration
+    canonical_unit: g/dL

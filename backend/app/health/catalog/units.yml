@@ -1,0 +1,16 @@
+# Unit spelling normalization. H1 policy: identity only — a unit that does
+# not normalize to the metric's canonical unit yields NO converted value
+# (original preserved, observation provisional). Conversions are a later
+# phase; do NOT add ratios here without a Decision.
+canonical:
+  - mg/dL
+  - g/dL
+  - U/L
+  - mL/min/1.73m2
+  - "%"
+
+spellings:
+  "ｍｇ/ｄＬ": mg/dL
+  "mg/dl": mg/dL
+  "IU/L": U/L
+  "u/l": U/L

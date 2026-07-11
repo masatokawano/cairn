@@ -31,6 +31,12 @@ app.add_typer(sync_app, name="sync")
 app.add_typer(review_app, name="review")
 app.add_typer(index_app, name="index")
 
+# Health domain (ADR-0005/H0): independent store, never cairn.db. The sub-app
+# module is import-light; duckdb loads only inside its commands.
+from .health.cli import health_app  # noqa: E402
+
+app.add_typer(health_app, name="health")
+
 
 @sync_app.command("conversations")
 def sync_conversations() -> None:

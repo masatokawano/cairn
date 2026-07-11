@@ -187,6 +187,28 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 | max_observed_at | TIMESTAMPTZ NULL | 最新観測 |
 | catalog_version | TEXT | 項目定義版 |
 
+### 2.11 quarantine_records（H1 実装済み）
+
+不明な項目名など、推測で正規化しないデータの保留台帳（DESIGN.md health §6）。
+値そのものは保護ストア内にのみ保存され、ログには件数だけが出る。
+
+| column | type | meaning |
+|---|---|---|
+| id | UUID | 保留ID |
+| source_file_id | UUID | 原本 |
+| import_run_id | UUID | 発生した import 実行 |
+| reason_code | TEXT | unknown_metric / parse_error |
+| original_metric | TEXT NULL | 原項目名 |
+| original_unit | TEXT NULL | 原単位 |
+| source_row_ref | TEXT NULL | セル位置 |
+| payload_json | JSON | 原セル値（保護ストア内のみ） |
+| created_at | TIMESTAMPTZ | 記録日時 |
+| status | TEXT | pending / resolved |
+
+同一原本の同一セルは再取り込みで重複保留しない（冪等）。
+別ハッシュの原本（月次 export の更新版等）では、新しい原本への provenance
+付きで改めて保留される。解決はエイリアスカタログの拡張 + mapping_version 更新で行う。
+
 ## 3. 派生ビュー
 
 - `v_latest_observation_by_metric`
@@ -217,6 +239,17 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 | synthetic_a | 2031-08-19 | 23 | arb-U/L |
 | synthetic_b | 2031-02-03 | 1.23 | arb-mg/dL |
 | synthetic_b | 2031-08-19 | 1.19 | arb-mg/dL |
+
+H1 の入力契約（`importers/labs_csv.py` docstring が実装正）:
+
+- 先頭列は `項目`（または `metric`/`item`）、任意で `単位`・`基準値` 列、
+  残りの列はすべて日付（`YYYY-MM-DD` / `YYYY/MM/DD`）。
+- **基準範囲の変更**は、同じ項目を新しい `基準値` の別行として追加し、
+  適用される日付列にだけ値を書くことで表現する。各観測は自分の行の
+  基準範囲を保持するため、範囲は検査日単位で残る（グローバル上書きなし）。
+- 空セルは観測なし（何も捏造しない）。数値でないセル（`<5` 等）は
+  value_text として保持。未知の単位は原値のみ保持し正規化値を持たない
+  （quality_status=provisional）。
 
 ## 5. バージョニング
 

@@ -1,0 +1,32 @@
+# Verbatim lab-sheet spellings -> canonical metric_id (namespace lab_sheet).
+# Unknown spellings are QUARANTINED by the importer, never guessed — extend
+# this file (and bump mapping_version) instead.
+mapping_version: "2026.07"
+
+aliases:
+  Cr: creatinine
+  CRE: creatinine
+  クレアチニン: creatinine
+  eGFR: egfr
+  AST: ast
+  AST(GOT): ast
+  GOT: ast
+  ALT: alt
+  ALT(GPT): alt
+  GPT: alt
+  γ-GTP: gamma_gtp
+  γGTP: gamma_gtp
+  GGT: gamma_gtp
+  LDL-C: ldl_cholesterol
+  LDLコレステロール: ldl_cholesterol
+  HDL-C: hdl_cholesterol
+  HDLコレステロール: hdl_cholesterol
+  TG: triglycerides
+  中性脂肪: triglycerides
+  GLU: glucose
+  血糖: glucose
+  HbA1c: hba1c
+  UA: uric_acid
+  尿酸: uric_acid
+  Hb: hemoglobin
+  ヘモグロビン: hemoglobin

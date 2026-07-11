@@ -6,14 +6,17 @@ Automated tests use synthetic data only. Real personal health data must never ap
 
 ## H0 — Design and safety boundary
 
-- [ ] ADR-0005 has an explicit status.
-- [ ] The relationship among `docs/NORTH_STAR.md`, root `docs/DESIGN.md`, and the health design is documented.
-- [ ] The default health data home is outside the Git worktree.
-- [ ] Directories are mode 0700 and data files are mode 0600.
-- [ ] Worktree paths, traversal, and unsafe symlink targets are rejected.
-- [ ] Health MCP is absent or disabled by default.
-- [ ] No root `cairn.db` migration is required for H0/H1.
-- [ ] A repository audit detects likely private health artifacts.
+- [x] ADR-0005 has an explicit status.
+- [x] The relationship among `docs/NORTH_STAR.md`, root `docs/DESIGN.md`, and the health design is documented.
+- [x] The default health data home is outside the Git worktree.
+- [x] Directories are mode 0700 and data files are mode 0600.
+- [x] Worktree paths, traversal, and unsafe symlink targets are rejected.
+- [x] Health MCP is absent or disabled by default.
+- [x] No root `cairn.db` migration is required for H0/H1.
+- [x] A repository audit detects likely private health artifacts.
+
+H0 verified 2026-07-11: `backend/tests/health/` + live `cairn health init` /
+`doctor` all-green on the production Mac.
 
 ## H1 — Laboratory CSV vertical slice
 
@@ -32,19 +35,23 @@ The fixture contains:
 
 ### Acceptance
 
-- [ ] A horizontal date-column CSV is transformed to one observation per row.
-- [ ] Original metric, value, unit, and reference text are retained.
-- [ ] Canonical metric, normalized value, normalized unit, and mapping version are stored separately.
-- [ ] Date-only precision remains date-only.
-- [ ] Reference ranges are retained per observation date.
-- [ ] Re-importing an unchanged CSV does not increase observation count.
-- [ ] A changed cell affects only the corresponding record or version.
-- [ ] Unknown metric names are quarantined rather than guessed.
-- [ ] Unknown units preserve the original value without false normalization.
-- [ ] Every observation points to a source file and source-row reference.
-- [ ] A failed import rolls back normalized writes while preserving the raw source.
-- [ ] Logs contain counts and IDs, but no measurement values.
-- [ ] A deterministic Markdown summary can be generated from a fixed snapshot.
+- [x] A horizontal date-column CSV is transformed to one observation per row.
+- [x] Original metric, value, unit, and reference text are retained.
+- [x] Canonical metric, normalized value, normalized unit, and mapping version are stored separately.
+- [x] Date-only precision remains date-only.
+- [x] Reference ranges are retained per observation date.
+- [x] Re-importing an unchanged CSV does not increase observation count.
+- [x] A changed cell affects only the corresponding record or version.
+- [x] Unknown metric names are quarantined rather than guessed.
+- [x] Unknown units preserve the original value without false normalization.
+- [x] Every observation points to a source file and source-row reference.
+- [x] A failed import rolls back normalized writes while preserving the raw source.
+- [x] Logs contain counts and IDs, but no measurement values.
+- [x] A deterministic Markdown summary can be generated from a fixed snapshot.
+
+H1 verified 2026-07-11 with synthetic data (`backend/tests/health/`, 38
+tests; suite total 553 passed). Local real-data verification (below) is a
+separate, still-open human step.
 
 ## H2 — Intervention and event ledger
 

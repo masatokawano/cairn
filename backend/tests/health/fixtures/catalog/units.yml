@@ -1,0 +1,7 @@
+# "wat-units" is deliberately absent: it exercises the unknown-unit path.
+canonical:
+  - arb-U/L
+  - arb-mg/dL
+  - arb-kU/L
+
+spellings: {}

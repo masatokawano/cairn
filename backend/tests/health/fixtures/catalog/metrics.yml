@@ -1,0 +1,19 @@
+# Fully synthetic test catalog (no real metric definitions).
+catalog_version: "test-1"
+
+metrics:
+  synthetic_a:
+    label_ja: 合成A
+    quantity_kind: catalytic_activity
+    canonical_unit: arb-U/L
+  synthetic_b:
+    label_ja: 合成B
+    quantity_kind: concentration
+    canonical_unit: arb-mg/dL
+  synthetic_c:
+    label_ja: 合成C
+    quantity_kind: qualitative
+  synthetic_d:
+    label_ja: 合成D
+    quantity_kind: concentration
+    canonical_unit: arb-kU/L
