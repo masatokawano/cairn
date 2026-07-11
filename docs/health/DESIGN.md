@@ -248,18 +248,21 @@ H1では既存スプレッドシートから手動exportしたCSVを正式入力
 
 ### 5.3 Event ledger
 
-服薬・サプリ・生活変化は明示的イベントとして記録する。
+服薬・サプリ・生活変化は明示的イベントとして記録する（H2 実装済み。
+実装正は `importers/events_yaml.py` docstring、格納形は DATA_MODEL §2.6）。
 
 ```yaml
 - id: event-example-001
   kind: medication_start
-  occurred_at: 2026-01-01
+  start: 2026-01-01          # '2026-01'（月精度）や '~2026-01-01'（approximate）も可
+  end: null                  # 任意
   label: Example medication
   dose:
     value: 10
     unit: mg/day
   source: self_report
   confidence: confirmed
+  # 訂正は編集ではなく、新しいエントリ + supersedes: <旧id> で行う（append-only）
 ```
 
 公開リポジトリには合成例だけを置き、実イベントファイルはhealth data homeへ置く。

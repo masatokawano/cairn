@@ -1,0 +1,31 @@
+# Fully synthetic event ledger (no real medications, dates or context).
+- id: evt-med-001
+  kind: medication_start
+  label: Synthetic medication
+  start: 2031-04-01
+  dose: {value: 10, unit: mg/day}
+  route: oral
+  frequency: daily
+  source: self_report
+  confidence: confirmed
+
+- id: evt-smoke-001
+  kind: smoking_stop
+  start: "2031-03"
+  source: self_report
+  confidence: estimated
+
+- id: evt-trip-001
+  kind: travel
+  label: Synthetic trip
+  start: "~2031-05-01"
+  end: 2031-05-20
+  source: self_report
+  confidence: confirmed
+
+- id: evt-ill-001
+  kind: illness
+  label: Synthetic illness
+  source: self_report
+  confidence: uncertain
+  notes: synthetic-note-text that must never be interpreted as a fact

@@ -17,8 +17,10 @@ def _json(result):
 
 
 def test_init_and_doctor(health_home):
+    from app.health import schema
+
     out = _json(runner.invoke(app, ["health", "init"]))
-    assert out["schema_version"] == 1
+    assert out["schema_version"] == schema.SCHEMA_VERSION
     assert set(out["subdirs"]) == {"raw", "store", "derived", "reports",
                                    "quarantine", "backups"}
     doc = _json(runner.invoke(app, ["health", "doctor"]))
