@@ -20,8 +20,12 @@
   D12 / README 実態化）。DESIGN.md は v1.2
 - 2026-07-11: 健康ドメイン批准 + H0/H1 実装（ADR-0005 / DESIGN.md v1.3 D13 / 凍結例外）。
   `backend/app/health/`（独立 DuckDB ストア、labs CSV 縦切り、init/doctor/import/status/
-  report labs）、テスト 38 件追加で **553 passed**。cairn.db 非接触。
-  残: 実データ検証（ACCEPTANCE 末尾の人間手順）→ H2 イベント台帳
+  report labs）、テスト 38 件追加。cairn.db 非接触
+- 2026-07-11: H2 イベント台帳実装。events YAML importer（append-only + supersedes 訂正、
+  不確実日付は原文 + earliest/latest 区間で捏造なし）、overlay / before-after 窓の factual
+  比較、`report event-response`、store schema v2（premigrate 自動バックアップ付き独立
+  migration 初稼働）。テスト 19 件追加で **572 passed**。
+  残: 実データ検証（labs + events、ACCEPTANCE 末尾）→ H3 Apple Health
 
 ## 採用基準
 

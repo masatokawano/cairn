@@ -1,8 +1,9 @@
-"""Health store schema, H0/H1 subset only (docs/health/DATA_MODEL.md).
+"""Health store schema (docs/health/DATA_MODEL.md), H0/H1 + H2 subset.
 
-Versioned independently from cairn.db (schema_meta.schema_version). Future
-tables (events / documents / interpretations / data_snapshots) are NOT
-created in advance — H0_H1_TASK.md forbids pre-building later milestones.
+Versioned independently from cairn.db (schema_meta.schema_version, additive
+migrations with an automatic premigrate backup). Future tables (documents /
+interpretations / data_snapshots) are NOT created in advance —
+H0_H1_TASK.md forbids pre-building later milestones.
 
 Column notes:
 
@@ -17,7 +18,7 @@ Column notes:
 """
 from __future__ import annotations
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -123,20 +124,74 @@ CREATE TABLE IF NOT EXISTS quarantine_records (
 );
 """
 
+# v2 (H2): explicit intervention/context event ledger. Times may be exact,
+# month-only or approximate — represented as the ORIGINAL string plus an
+# earliest/latest DATE interval, never an invented timestamp. Rows are
+# append-only; a correction is a NEW row pointing at its predecessor via
+# supersedes_id (ACCEPTANCE H2).
+EVENTS_DDL = """
+CREATE TABLE IF NOT EXISTS events (
+    id             TEXT PRIMARY KEY,            -- author-assigned, stable
+    kind           TEXT NOT NULL,
+    label          TEXT,
+    start_raw      TEXT,                        -- verbatim (e.g. '2031-03', '~2031-06-01')
+    start_earliest DATE,
+    start_latest   DATE,
+    end_raw        TEXT,
+    end_earliest   DATE,
+    end_latest     DATE,
+    time_precision TEXT NOT NULL,               -- date / month / approximate / unknown
+    status         TEXT NOT NULL,               -- active / completed / uncertain
+    dose_value     DOUBLE,
+    dose_unit      TEXT,
+    route          TEXT,
+    frequency      TEXT,
+    source_type    TEXT NOT NULL,               -- self_report / clinician / document
+    source_file_id TEXT,
+    confidence     TEXT NOT NULL,               -- confirmed / estimated / uncertain
+    notes          TEXT,                        -- free text; NEVER auto-interpreted
+    supersedes_id  TEXT,                        -- append-only correction chain
+    entry_hash     TEXT NOT NULL,               -- content hash for idempotency
+    imported_at    TIMESTAMPTZ NOT NULL,
+    meta_json      TEXT
+);
+"""
+
+# version -> DDL applied when upgrading TO that version (additive only).
+MIGRATIONS: dict[int, str] = {2: EVENTS_DDL}
+
 
 def apply(conn) -> None:
-    """Create the H0/H1 schema and stamp the version (idempotent)."""
+    """Create/upgrade the schema and stamp the version (idempotent).
+
+    Additive migrations only. The premigrate file backup happens BEFORE the
+    store is even opened (store.connect peeks at the version read-only) —
+    by the time this runs, the snapshot already exists.
+    """
     conn.execute(DDL)  # duckdb runs multi-statement scripts natively
     row = conn.execute(
         "SELECT value FROM schema_meta WHERE key = 'schema_version'"
     ).fetchone()
     if row is None:
+        # Fresh store: base DDL + every migration = current version.
+        for version in sorted(MIGRATIONS):
+            conn.execute(MIGRATIONS[version])
         conn.execute(
             "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)",
             [str(SCHEMA_VERSION)],
         )
-    elif int(row[0]) != SCHEMA_VERSION:
-        # Only v1 exists; a mismatch means a newer store touched by older code.
+        return
+
+    current = int(row[0])
+    if current > SCHEMA_VERSION:
         raise RuntimeError(
-            f"health store schema v{row[0]} != supported v{SCHEMA_VERSION}"
+            f"health store schema v{current} is newer than supported "
+            f"v{SCHEMA_VERSION} — update the code, do not downgrade the store"
+        )
+    if current < SCHEMA_VERSION:
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            conn.execute(MIGRATIONS[version])
+        conn.execute(
+            "UPDATE schema_meta SET value=? WHERE key='schema_version'",
+            [str(SCHEMA_VERSION)],
         )

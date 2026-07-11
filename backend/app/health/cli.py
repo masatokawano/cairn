@@ -137,6 +137,26 @@ def import_labs_csv(
     _echo(stats)
 
 
+@import_app.command("events")
+def import_events(
+    file: Path = typer.Argument(..., help="Event ledger YAML (append-only;"
+                                          " corrections via 'supersedes')."),
+) -> None:
+    """Import medication/supplement/lifestyle events (H2)."""
+    from .importers import events_yaml
+
+    try:
+        stats = events_yaml.run(file)
+    except events_yaml.EventsError as exc:
+        # EventsError messages reference entry ids only — safe to surface.
+        typer.echo(f"import failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"import failed: {type(exc).__name__}", err=True)
+        raise typer.Exit(code=1)
+    _echo(stats)
+
+
 @health_app.command("status")
 def status() -> None:
     """Store row counts and versions (no values, metric names or dates)."""
@@ -164,3 +184,19 @@ def report_labs() -> None:
     from .reports import lab_summary
 
     _echo(lab_summary.write())
+
+
+@report_app.command("event-response")
+def report_event_response(
+    event_id: str = typer.Argument(..., help="Event id from the ledger."),
+    days: int = typer.Option(90, "--days",
+                             help="Window size around the event start."),
+) -> None:
+    """Write a factual before/after window report for one event (H2)."""
+    from .reports import event_response
+
+    try:
+        _echo(event_response.write(event_id, window_days=days))
+    except KeyError as exc:
+        typer.echo(f"report failed: {exc}", err=True)
+        raise typer.Exit(code=1)

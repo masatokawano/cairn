@@ -7,16 +7,52 @@ SQLite fallback path was not taken. duckdb is imported lazily so `cairn
 """
 from __future__ import annotations
 
+import logging
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config, schema
+
+logger = logging.getLogger("cairn.health")
+
+
+def _peek_version(path: Path) -> int | None:
+    """Read schema_version without taking a write handle (for the
+    premigrate backup decision — the copy must precede any write)."""
+    import duckdb
+
+    ro = duckdb.connect(str(path), read_only=True)
+    try:
+        row = ro.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        return int(row[0]) if row else None
+    except duckdb.CatalogException:
+        return None
+    finally:
+        ro.close()
+
+
+def _premigrate_backup(home: Path, path: Path, from_version: int) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    target = (home / "backups" /
+              f"health.duckdb.premigrate-v{from_version}-to-"
+              f"v{schema.SCHEMA_VERSION}-{stamp}")
+    shutil.copy2(path, target)
+    config.protect_file(target)
+    logger.info("health store premigrate backup v%d->v%d",
+                from_version, schema.SCHEMA_VERSION)
+    return target
 
 
 def connect(home: Path | None = None, *, create: bool = False):
     """Open (and on ``create=True`` initialize) the health store.
 
-    Always applies/validates the schema version and enforces file mode 0600
-    on the DB file. Returns a duckdb connection.
+    Applies/validates the schema version — upgrading an older store first
+    snapshots the DB file into backups/ (additive migrations only, but the
+    premigrate copy makes even those trivially reversible). Enforces file
+    mode 0600. Returns a duckdb connection.
     """
     import duckdb
 
@@ -27,6 +63,10 @@ def connect(home: Path | None = None, *, create: bool = False):
         raise FileNotFoundError(
             f"health store not initialized (run `cairn health init`): {path}"
         )
+    if path.exists():
+        current = _peek_version(path)
+        if current is not None and current < schema.SCHEMA_VERSION:
+            _premigrate_backup(home, path, current)
     conn = duckdb.connect(str(path))
     schema.apply(conn)
     config.protect_file(path)
@@ -41,6 +81,7 @@ def counts(conn) -> dict:
         "source_files",
         "import_runs",
         "observations",
+        "events",
         "quarantine_records",
         "metric_catalog",
         "metric_aliases",

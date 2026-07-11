@@ -55,13 +55,17 @@ separate, still-open human step.
 
 ## H2 — Intervention and event ledger
 
-- [ ] Medication, supplement, lifestyle, illness, travel, and procedure events validate against a schema.
-- [ ] Exact, date-only, month-only, and approximate times are represented without invented timestamps.
-- [ ] Dose, unit, frequency, source, and confidence are optional but structured.
-- [ ] Event histories are append-only and support correction through supersession.
-- [ ] Active event intervals can be overlaid on an observation timeline.
-- [ ] A missing or uncertain start date is visible as uncertainty.
-- [ ] Free-text event notes are not interpreted as medical facts automatically.
+- [x] Medication, supplement, lifestyle, illness, travel, and procedure events validate against a schema.
+- [x] Exact, date-only, month-only, and approximate times are represented without invented timestamps.
+- [x] Dose, unit, frequency, source, and confidence are optional but structured.
+- [x] Event histories are append-only and support correction through supersession.
+- [x] Active event intervals can be overlaid on an observation timeline.
+- [x] A missing or uncertain start date is visible as uncertainty.
+- [x] Free-text event notes are not interpreted as medical facts automatically.
+
+H2 verified 2026-07-11 with synthetic data (`tests/health/test_events.py`,
+`test_event_response.py`, `test_migration.py`; suite total 572 passed).
+Store schema v1→v2 migrates additively with an automatic premigrate backup.
 
 ## H3 — Apple Health export
 

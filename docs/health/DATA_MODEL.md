@@ -107,25 +107,35 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 - `observed_start/end`または`observed_date`を持つ。
 - 原値は必須。正規化失敗時も事実を失わない。
 
-### 2.6 events
+### 2.6 events（H2 実装済み、schema v2）
+
+不確実な日付は「原文 + earliest/latest の区間」で表現し、タイムスタンプを
+捏造しない（`2031-03` → earliest=3/1, latest=3/31, precision=month。
+`~` 接頭辞 = approximate。start 欠損 = precision=unknown, status=uncertain）。
+行は append-only: 訂正は `supersedes_id` を付けた新しい行で行い、
+「現在のイベント」= 他の行から supersede されていない行。
 
 | column | type | meaning |
 |---|---|---|
-| id | UUID | イベントID |
-| kind | TEXT | medication_start / dose_change / supplement_start / smoking_stop等 |
-| label | TEXT | 表示名 |
-| start_at | TIMESTAMPTZ/DATE | 開始 |
-| end_at | TIMESTAMPTZ/DATE NULL | 終了 |
-| time_precision | TEXT | instant / date / month / approximate |
+| id | TEXT PK | 記入者が付ける安定ID（YAML の `id`） |
+| kind | TEXT | medication_start / medication_stop / dose_change / supplement_start / supplement_stop / smoking_stop / alcohol_change / exercise_change / illness / procedure / travel / context_change |
+| label | TEXT NULL | 表示名 |
+| start_raw / end_raw | TEXT NULL | 原文のまま（`2031-03`・`~2031-05-01` 等） |
+| start_earliest / start_latest | DATE NULL | 開始の区間下限/上限 |
+| end_earliest / end_latest | DATE NULL | 終了の区間下限/上限 |
+| time_precision | TEXT | date / month / approximate / unknown |
 | status | TEXT | active / completed / uncertain |
 | dose_value | DOUBLE NULL | 用量 |
 | dose_unit | TEXT NULL | mg/day等 |
 | route | TEXT NULL | oral等 |
 | frequency | TEXT NULL | daily / every_other_day等 |
 | source_type | TEXT | self_report / clinician / document |
-| source_file_id | UUID NULL | 原本がある場合 |
+| source_file_id | UUID NULL | 取り込み元 ledger ファイル |
 | confidence | TEXT | confirmed / estimated / uncertain |
-| notes | TEXT NULL | 事実記述。分析は書かない |
+| notes | TEXT NULL | 自由記述。**レポートへ出力せず、事実として解釈しない** |
+| supersedes_id | TEXT NULL | append-only 訂正チェーン |
+| entry_hash | TEXT | 冪等判定用の内容ハッシュ（同一 id + 内容変更は拒否） |
+| imported_at | TIMESTAMPTZ | 取り込み日時 |
 | meta_json | JSON | 追加情報 |
 
 ### 2.7 documents
