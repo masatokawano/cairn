@@ -1,32 +1,124 @@
 # Verbatim lab-sheet spellings -> canonical metric_id (namespace lab_sheet).
-# Unknown spellings are QUARANTINED by the importer, never guessed — extend
-# this file (and bump mapping_version) instead.
-mapping_version: "2026.07"
+# Includes full names AND abbreviations; the importer tries the full name
+# then the 項目略称 column. Unknown spellings are QUARANTINED, never guessed —
+# extend this file (and bump mapping_version) instead. Some entries preserve
+# the source sheet's exact spelling, including its typos (e.g. 総ピリルビン).
+mapping_version: "2026.07-2"
 
 aliases:
-  Cr: creatinine
-  CRE: creatinine
-  クレアチニン: creatinine
-  eGFR: egfr
+  # liver / protein
   AST: ast
   AST(GOT): ast
   GOT: ast
   ALT: alt
   ALT(GPT): alt
   GPT: alt
+  ALP: alp
+  LD: ld
+  LDH: ld
   γ-GTP: gamma_gtp
   γGTP: gamma_gtp
   GGT: gamma_gtp
-  LDL-C: ldl_cholesterol
-  LDLコレステロール: ldl_cholesterol
-  HDL-C: hdl_cholesterol
-  HDLコレステロール: hdl_cholesterol
-  TG: triglycerides
-  中性脂肪: triglycerides
-  GLU: glucose
-  血糖: glucose
-  HbA1c: hba1c
-  UA: uric_acid
+  コリンエステラーゼ: cholinesterase
+  Ch-E: cholinesterase
+  ChE: cholinesterase
+  血清アミラーゼ: amylase
+  SAMY: amylase
+  AMY: amylase
+  CPK: ck
+  CK: ck
+  ZTT: ztt
+  総蛋白: total_protein
+  TP: total_protein
+  アルブミン: albumin
+  Alb: albumin
+  アルブミン対グロブリン比: ag_ratio
+  A/G: ag_ratio
+  総ビリルビン: total_bilirubin
+  総ピリルビン: total_bilirubin
+  TBL: total_bilirubin
+  T-BIL: total_bilirubin
+
+  # renal / electrolytes
+  尿素窒素: urea_nitrogen
+  UN: urea_nitrogen
+  BUN: urea_nitrogen
+  クレアチニン: creatinine
+  Cr: creatinine
+  CRE: creatinine
+  クレアチン: creatine
+  Creatine: creatine
+  推定糸球体濾過量: egfr
+  eGFR: egfr
   尿酸: uric_acid
-  Hb: hemoglobin
+  UA: uric_acid
+  血清鉄: iron
+  Fe: iron
+  ナトリウム: sodium
+  Na: sodium
+  クロール: chloride
+  Cl: chloride
+  カリウム: potassium
+  K: potassium
+
+  # metabolic / lipids
+  血糖: glucose
+  血糖(空腹時): glucose
+  GLU: glucose
+  Glu: glucose
+  グリコアルブミン: glycoalbumin
+  GA: glycoalbumin
+  HbA1c: hba1c
+  ヘモグロビンAlc: hba1c
+  総コレステロール: total_cholesterol
+  T-Cho: total_cholesterol
+  T-CHO: total_cholesterol
+  LDLコレステロール: ldl_cholesterol
+  LDL-C: ldl_cholesterol
+  HDLコレステロール: hdl_cholesterol
+  HDL-C: hdl_cholesterol
+  non-HDL: non_hdl_cholesterol
+  中性脂肪: triglycerides
+  TG: triglycerides
+  AI指数: atherogenic_index
+
+  # inflammation / immunology / tumor marker
+  CRP定量: crp
+  CRP: crp
+  RF定量: rf
+  RF: rf
+  PSA: psa
+
+  # complete blood count
   ヘモグロビン: hemoglobin
+  ヘモグロビン量: hemoglobin
+  血色素量: hemoglobin
+  Hb: hemoglobin
+  Hgb: hemoglobin
+  赤血球: rbc
+  RBC: rbc
+  白血球数: wbc
+  WBC: wbc
+  血小板数: platelets
+  PLT: platelets
+  ヘマトクリット値: hematocrit
+  Ht: hematocrit
+  Hct: hematocrit
+  平均赤血球容積: mcv
+  MCV: mcv
+  平均赤血球ヘモグロビン量: mch
+  MCH: mch
+  平均赤血球ヘモグロビン濃度: mchc
+  MCHC: mchc
+
+  # spirometry
+  予測肺活量: vc_predicted
+  FVCPR: vc_predicted
+  ％肺活量: vc_percent
+  "%VC": vc_percent
+  努力性肺活量: fvc
+  FVC: fvc
+  1秒量: fev1
+  FEV1: fev1
+  1秒率: fev1_percent
+  FEV1.0%: fev1_percent

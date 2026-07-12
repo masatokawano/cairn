@@ -1,20 +1,12 @@
 # Metric catalog (public medical vocabulary only — no personal data).
 # LOINC codes are attached only where confidently known (DESIGN.md health
 # §4.2: 誤ったコードを無理に付けない). Extend per-need, bump catalog_version.
-catalog_version: "2026.07"
+# canonical_unit values must match a normalized spelling in units.yml so the
+# importer can mark matching observations `valid` (identity normalization).
+catalog_version: "2026.07-2"
 
 metrics:
-  creatinine:
-    label_ja: クレアチニン
-    label_en: Creatinine
-    quantity_kind: concentration
-    canonical_unit: mg/dL
-    loinc: 2160-0
-  egfr:
-    label_ja: eGFR
-    label_en: eGFR
-    quantity_kind: rate
-    canonical_unit: mL/min/1.73m2
+  # --- liver / protein ---
   ast:
     label_ja: AST（GOT）
     label_en: AST
@@ -25,11 +17,130 @@ metrics:
     label_en: ALT
     quantity_kind: catalytic_activity
     canonical_unit: U/L
+  alp:
+    label_ja: ALP
+    label_en: ALP
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  ld:
+    label_ja: LD（LDH）
+    label_en: LD
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
   gamma_gtp:
     label_ja: γ-GTP
     label_en: Gamma-GTP
     quantity_kind: catalytic_activity
     canonical_unit: U/L
+  cholinesterase:
+    label_ja: コリンエステラーゼ
+    label_en: Cholinesterase
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  amylase:
+    label_ja: 血清アミラーゼ
+    label_en: Amylase
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  ck:
+    label_ja: CK（CPK）
+    label_en: Creatine kinase
+    quantity_kind: catalytic_activity
+    canonical_unit: U/L
+  ztt:
+    label_ja: ZTT
+    label_en: Zinc sulfate turbidity test
+    quantity_kind: turbidity
+    canonical_unit: U
+  total_protein:
+    label_ja: 総蛋白
+    label_en: Total protein
+    quantity_kind: concentration
+    canonical_unit: g/dL
+  albumin:
+    label_ja: アルブミン
+    label_en: Albumin
+    quantity_kind: concentration
+    canonical_unit: g/dL
+  ag_ratio:
+    label_ja: アルブミン対グロブリン比
+    label_en: A/G ratio
+    quantity_kind: ratio
+  total_bilirubin:
+    label_ja: 総ビリルビン
+    label_en: Total bilirubin
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+
+  # --- renal / electrolytes ---
+  urea_nitrogen:
+    label_ja: 尿素窒素
+    label_en: Urea nitrogen
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  creatinine:
+    label_ja: クレアチニン
+    label_en: Creatinine
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+    loinc: 2160-0
+  creatine:
+    label_ja: クレアチン
+    label_en: Creatine
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  egfr:
+    label_ja: eGFR
+    label_en: eGFR
+    quantity_kind: rate
+    canonical_unit: mL/min/1.73m2
+  uric_acid:
+    label_ja: 尿酸
+    label_en: Uric acid
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  iron:
+    label_ja: 血清鉄
+    label_en: Serum iron
+    quantity_kind: concentration
+    canonical_unit: μg/dL
+  sodium:
+    label_ja: ナトリウム
+    label_en: Sodium
+    quantity_kind: concentration
+    canonical_unit: mEq/L
+  chloride:
+    label_ja: クロール
+    label_en: Chloride
+    quantity_kind: concentration
+    canonical_unit: mEq/L
+  potassium:
+    label_ja: カリウム
+    label_en: Potassium
+    quantity_kind: concentration
+    canonical_unit: mEq/L
+
+  # --- metabolic / lipids ---
+  glucose:
+    label_ja: 血糖
+    label_en: Glucose
+    quantity_kind: concentration
+    canonical_unit: mg/dL
+  glycoalbumin:
+    label_ja: グリコアルブミン
+    label_en: Glycated albumin
+    quantity_kind: fraction
+    canonical_unit: "%"
+  hba1c:
+    label_ja: HbA1c
+    label_en: HbA1c
+    quantity_kind: fraction
+    canonical_unit: "%"
+  total_cholesterol:
+    label_ja: 総コレステロール
+    label_en: Total cholesterol
+    quantity_kind: concentration
+    canonical_unit: mg/dL
   ldl_cholesterol:
     label_ja: LDLコレステロール
     label_en: LDL cholesterol
@@ -40,28 +151,103 @@ metrics:
     label_en: HDL cholesterol
     quantity_kind: concentration
     canonical_unit: mg/dL
+  non_hdl_cholesterol:
+    label_ja: non-HDLコレステロール
+    label_en: non-HDL cholesterol
+    quantity_kind: concentration
+    canonical_unit: mg/dL
   triglycerides:
     label_ja: 中性脂肪
     label_en: Triglycerides
     quantity_kind: concentration
     canonical_unit: mg/dL
-  glucose:
-    label_ja: 血糖
-    label_en: Glucose
+  atherogenic_index:
+    label_ja: AI指数（動脈硬化指数）
+    label_en: Atherogenic index
+    quantity_kind: ratio
+
+  # --- inflammation / immunology / tumor marker ---
+  crp:
+    label_ja: CRP定量
+    label_en: C-reactive protein
     quantity_kind: concentration
     canonical_unit: mg/dL
-  hba1c:
-    label_ja: HbA1c
-    label_en: HbA1c
-    quantity_kind: fraction
-    canonical_unit: "%"
-  uric_acid:
-    label_ja: 尿酸
-    label_en: Uric acid
+  rf:
+    label_ja: RF定量
+    label_en: Rheumatoid factor
     quantity_kind: concentration
-    canonical_unit: mg/dL
+    canonical_unit: IU/mL
+  psa:
+    label_ja: PSA
+    label_en: Prostate-specific antigen
+    quantity_kind: concentration
+    canonical_unit: ng/mL
+
+  # --- complete blood count ---
   hemoglobin:
     label_ja: ヘモグロビン
     label_en: Hemoglobin
     quantity_kind: concentration
     canonical_unit: g/dL
+  rbc:
+    label_ja: 赤血球数
+    label_en: Red blood cell count
+    quantity_kind: count
+    canonical_unit: "*10000/μl"
+  wbc:
+    label_ja: 白血球数
+    label_en: White blood cell count
+    quantity_kind: count
+    canonical_unit: "*100/μl"
+  platelets:
+    label_ja: 血小板数
+    label_en: Platelet count
+    quantity_kind: count
+    canonical_unit: "*10000/μl"
+  hematocrit:
+    label_ja: ヘマトクリット値
+    label_en: Hematocrit
+    quantity_kind: fraction
+    canonical_unit: "%"
+  mcv:
+    label_ja: 平均赤血球容積
+    label_en: MCV
+    quantity_kind: volume
+    canonical_unit: fL
+  mch:
+    label_ja: 平均赤血球ヘモグロビン量
+    label_en: MCH
+    quantity_kind: mass
+    canonical_unit: pg
+  mchc:
+    label_ja: 平均赤血球ヘモグロビン濃度
+    label_en: MCHC
+    quantity_kind: fraction
+    canonical_unit: "%"
+
+  # --- spirometry ---
+  vc_predicted:
+    label_ja: 予測肺活量
+    label_en: Predicted vital capacity
+    quantity_kind: volume
+    canonical_unit: mL
+  vc_percent:
+    label_ja: ％肺活量
+    label_en: Percent vital capacity
+    quantity_kind: fraction
+    canonical_unit: "%"
+  fvc:
+    label_ja: 努力性肺活量
+    label_en: Forced vital capacity
+    quantity_kind: volume
+    canonical_unit: mL
+  fev1:
+    label_ja: 1秒量
+    label_en: FEV1
+    quantity_kind: volume
+    canonical_unit: mL
+  fev1_percent:
+    label_ja: 1秒率
+    label_en: FEV1%
+    quantity_kind: fraction
+    canonical_unit: "%"

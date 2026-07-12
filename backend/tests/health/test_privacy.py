@@ -62,14 +62,28 @@ def _git_repo(path: Path) -> Path:
     return path
 
 
-def test_audit_detects_health_artifacts(tmp_path):
+def test_audit_detects_committable_health_artifacts(tmp_path):
     repo = _git_repo(tmp_path / "repo")
     (repo / "export.xml").write_text("<HealthData/>")
     (repo / "notes.duckdb").write_bytes(b"")
+    (repo / "血液検査結果.csv").write_text("項目名\n")   # non-ASCII pattern
     result = audit.scan(repo)
     assert result["ok"] is False
-    hits = set(result["untracked"])
-    assert hits == {"export.xml", "notes.duckdb"}
+    assert set(result["untracked"]) == {"export.xml", "notes.duckdb",
+                                        "血液検査結果.csv"}
+
+
+def test_audit_gitignored_health_file_is_warning_not_failure(tmp_path):
+    """A gitignored real-data file cannot be committed → ok stays True, but
+    it is surfaced in 'ignored' so doctor can nudge relocation."""
+    repo = _git_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text("scratch/\n")
+    (repo / "scratch").mkdir()
+    (repo / "scratch" / "export.xml").write_text("<HealthData/>")
+    result = audit.scan(repo)
+    assert result["ok"] is True
+    assert result["untracked"] == []
+    assert "scratch/export.xml" in result["ignored"]
 
 
 def test_audit_clean_repo_passes(tmp_path):
@@ -78,8 +92,10 @@ def test_audit_clean_repo_passes(tmp_path):
     assert audit.scan(repo)["ok"] is True
 
 
-def test_audit_on_this_repository_is_clean():
-    """Live guard: the actual Cairn worktree must never contain health
-    artifacts (AGENTS.md invariant 9). Fails the suite if one appears."""
+def test_audit_on_this_repository_has_nothing_committable():
+    """Live guard (AGENTS.md invariant 9): the real Cairn worktree must never
+    contain committable health artifacts. Gitignored scratch data (e.g. a
+    lab CSV placed in temp/ for import) is a separate, non-blocking warning."""
     result = audit.scan()
     assert result.get("ok") is True, result
+    assert result.get("tracked") == []

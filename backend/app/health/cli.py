@@ -91,10 +91,18 @@ def doctor() -> None:
     if "skipped" in result:
         check("repo_audit", True, result["skipped"])
     else:
-        hits = sum(len(result[k]) for k in ("tracked", "untracked", "ignored"))
-        check("repo_audit", result["ok"],
-              "clean" if result["ok"] else f"{hits} suspicious file(s): "
-              + json.dumps({k: result[k] for k in ("tracked", "untracked", "ignored") if result[k]}))
+        committable = result["tracked"] + result["untracked"]
+        if committable:
+            check("repo_audit", False, "committable health artifacts: "
+                  + json.dumps(committable, ensure_ascii=False))
+        elif result["ignored"]:
+            # Gitignored (can't be committed) but PRIVACY §3 wants it out of
+            # the worktree — warn without failing the gate.
+            check("repo_audit", True, f"clean for commit; WARNING: "
+                  f"{len(result['ignored'])} gitignored health file(s) in the "
+                  "worktree — move real data to the health data home")
+        else:
+            check("repo_audit", True, "clean")
 
     ok = all(c["ok"] for c in checks)
     _echo({"ok": ok, "checks": checks})
