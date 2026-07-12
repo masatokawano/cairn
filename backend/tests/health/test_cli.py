@@ -63,3 +63,31 @@ def test_import_failure_exits_nonzero(health_home, tmp_path):
     missing = tmp_path / "nope.csv"
     result = runner.invoke(app, ["health", "import", "labs-csv", str(missing)])
     assert result.exit_code == 1
+
+
+def test_document_flow_and_broken_refs(health_home):
+    from .conftest import FIXTURES
+
+    pdf = str(FIXTURES / "synthetic_document.pdf")
+    txt = str(FIXTURES / "synthetic_extracted.txt")
+    _json(runner.invoke(app, ["health", "init"]))
+
+    reg = _json(runner.invoke(app, ["health", "import", "document", pdf,
+                                    "--kind", "lab_report", "--date", "2031-05-01"]))
+    assert reg["status"] == "registered"
+    doc_id = reg["document_id"]
+
+    listed = _json(runner.invoke(app, ["health", "document", "list"]))
+    assert listed["documents"][0]["extraction_status"] == "none"
+
+    att = _json(runner.invoke(app, ["health", "document", "attach-text",
+                                    doc_id, txt]))
+    assert att["extraction_status"] == "draft"
+
+    refs = _json(runner.invoke(app, ["health", "report", "broken-refs"]))
+    assert refs["ok"] is True
+
+    doc = _json(runner.invoke(app, ["health", "doctor"]))
+    assert doc["ok"] is True
+    assert any(c["name"] == "provenance_intact" and c["ok"]
+               for c in doc["checks"])

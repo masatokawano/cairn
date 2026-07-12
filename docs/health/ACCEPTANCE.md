@@ -106,13 +106,22 @@ is a still-open human step.
 
 ## H4 — Documents and provenance
 
-- [ ] Source documents are copied or referenced without modification.
-- [ ] SHA-256, size, acquisition time, and document type are recorded.
-- [ ] Extracted text has `none`, `draft`, or `verified` status.
-- [ ] OCR output is never silently treated as verified source text.
-- [ ] Broken source-file references are detectable.
-- [ ] Generated reports enumerate their data snapshot and evidence IDs.
-- [ ] An observation can be traced to a source file and location.
+- [x] Source documents are copied or referenced without modification.
+- [x] SHA-256, size, acquisition time, and document type are recorded.
+- [x] Extracted text has `none`, `draft`, or `verified` status.
+- [x] OCR output is never silently treated as verified source text.
+- [x] Broken source-file references are detectable.
+- [x] Generated reports enumerate their data snapshot and evidence IDs.
+- [x] An observation can be traced to a source file and location.
+
+H4 verified 2026-07-12 with synthetic fixtures (`tests/health/test_documents.py`,
+`test_migration.py`; suite total 602 passed). Store schema v2→v3 (documents)
+migrates additively with a premigrate backup. OCR itself is deferred: this
+milestone establishes the immutable snapshot + extraction lifecycle
+(none→draft→verified, verified only by explicit human action) and
+broken-reference detection (`cairn health report broken-refs`, also a
+`doctor` check). Extracted text is attached separately via
+`cairn health document attach-text`.
 
 ## H5 — Reports and longitudinal comparison
 

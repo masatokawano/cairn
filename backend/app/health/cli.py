@@ -80,6 +80,10 @@ def doctor() -> None:
                 stuck = info["import_runs"] and _stuck_runs(home)
                 check("no_stuck_import_runs", not stuck,
                       f"{stuck} run(s) left in 'running'" if stuck else "")
+                broken = _broken_refs(home)
+                check("provenance_intact", not broken,
+                      f"{len(broken)} broken source/text reference(s)"
+                      if broken else "")
             except Exception as exc:
                 check("store_openable", False, type(exc).__name__)
         else:
@@ -118,6 +122,16 @@ def _stuck_runs(home) -> int:
         return conn.execute(
             "SELECT count(*) FROM import_runs WHERE status='running'"
         ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _broken_refs(home) -> list:
+    from . import analytics, store
+
+    conn = store.connect(home)
+    try:
+        return analytics.broken_references(conn, home)
     finally:
         conn.close()
 
@@ -163,6 +177,27 @@ def import_apple_export(
     _echo(stats)
 
 
+@import_app.command("document")
+def import_document(
+    file: Path = typer.Argument(..., help="Medical document file (PDF/image/…)."),
+    kind: str = typer.Option(..., "--kind",
+                             help="lab_report / imaging / endoscopy / prescription / …"),
+    title: str | None = typer.Option(None, "--title"),
+    date: str | None = typer.Option(None, "--date", help="Document date YYYY-MM-DD."),
+    issuer: str | None = typer.Option(None, "--issuer", help="Issuing facility."),
+) -> None:
+    """Register a medical document (immutable snapshot, no auto-extraction)."""
+    from .importers import documents
+
+    try:
+        stats = documents.register(file, kind=kind, title=title,
+                                   document_date=date, issuer=issuer)
+    except documents.DocumentError as exc:
+        typer.echo(f"register failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    _echo(stats)
+
+
 @import_app.command("events")
 def import_events(
     file: Path = typer.Argument(..., help="Event ledger YAML (append-only;"
@@ -200,6 +235,43 @@ def status() -> None:
     _echo(info)
 
 
+document_app = typer.Typer(no_args_is_help=True,
+                           help="Manage registered medical documents (H4).")
+health_app.add_typer(document_app, name="document")
+
+
+@document_app.command("attach-text")
+def document_attach_text(
+    document_id: str = typer.Argument(..., help="Document id from `import document`."),
+    text_file: Path = typer.Argument(..., help="Extracted/transcribed text file."),
+    verified: bool = typer.Option(
+        False, "--verified",
+        help="Mark as human-verified. Without this the text is stored as draft "
+             "(OCR/extracted text is never silently trusted).",
+    ),
+) -> None:
+    """Attach extracted text to a document (status draft, or verified)."""
+    from .importers import documents
+
+    try:
+        _echo(documents.attach_text(document_id, text_file, verified=verified))
+    except documents.DocumentError as exc:
+        typer.echo(f"attach failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
+@document_app.command("list")
+def document_list() -> None:
+    """List registered documents (metadata only, no extracted text)."""
+    from . import analytics, config, store
+
+    conn = store.connect(config.resolve_home())
+    try:
+        _echo({"documents": analytics.documents(conn)})
+    finally:
+        conn.close()
+
+
 report_app = typer.Typer(no_args_is_help=True, help="Generate factual reports.")
 health_app.add_typer(report_app, name="report")
 
@@ -222,6 +294,22 @@ def report_data_quality() -> None:
         _echo({"metrics": analytics.data_quality(conn)})
     finally:
         conn.close()
+
+
+@report_app.command("broken-refs")
+def report_broken_refs() -> None:
+    """List rows whose source snapshot or extracted text is missing on disk."""
+    from . import analytics, config, store
+
+    home = config.resolve_home()
+    conn = store.connect(home)
+    try:
+        broken = analytics.broken_references(conn, home)
+    finally:
+        conn.close()
+    _echo({"ok": not broken, "broken": broken})
+    if broken:
+        raise typer.Exit(code=1)
 
 
 @report_app.command("event-response")

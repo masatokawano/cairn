@@ -138,18 +138,26 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 | imported_at | TIMESTAMPTZ | 取り込み日時 |
 | meta_json | JSON | 追加情報 |
 
-### 2.7 documents
+### 2.7 documents（H4 実装済み、schema v3）
+
+医療文書のレジストリ。原本は `raw/documents/` へ不変スナップショット
+（source_files が hash/size/kind を保持）、この行が臨床メタと抽出ライフサイクル
+を持つ。抽出テキストは別操作（`document attach-text`）で付与し、`none` → `draft`
+→ `verified` の遷移で、`verified` は人間の明示操作でのみ（OCR を無検証で
+事実化しない、ACCEPTANCE H4）。壊れた参照は `report broken-refs` / `doctor`
+の `provenance_intact` で検出。
 
 | column | type | meaning |
 |---|---|---|
-| id | UUID | 文書ID |
-| document_kind | TEXT | lab_report / imaging / endoscopy / prescription等 |
+| id | TEXT PK | 文書ID |
+| document_kind | TEXT | lab_report / imaging / endoscopy / prescription / clinical_note / referral / discharge_summary / vaccination / other |
 | title | TEXT | 表示名 |
 | document_date | DATE NULL | 文書日 |
-| source_file_id | UUID | 原本 |
+| source_file_id | TEXT | 不変スナップショット（source_files） |
 | issuer | TEXT NULL | 発行機関 |
-| extracted_text_path | TEXT NULL | 検証済みテキストへの参照 |
-| extraction_status | TEXT | none / draft / verified |
+| extracted_text_path | TEXT NULL | 抽出テキスト（`derived/extracted/`、home 相対） |
+| extraction_status | TEXT | none / draft / verified（既定 none） |
+| imported_at | TIMESTAMPTZ | 登録日時 |
 | meta_json | JSON | 追加情報 |
 
 ### 2.8 interpretations

@@ -288,16 +288,21 @@ H1では既存スプレッドシートから手動exportしたCSVを正式入力
 ## 7. CLI案
 
 ```bash
-cairn health init
-cairn health import labs-csv FILE
-cairn health import apple-export FILE
-cairn health import events FILE
-cairn health import document FILE
+cairn health init                                   # H0
+cairn health doctor                                 # H0（provenance_intact 含む）
+cairn health import labs-csv FILE                    # H1
+cairn health import events FILE                      # H2
+cairn health import apple-export FILE                # H3（.zip/.xml）
+cairn health import document FILE --kind lab_report  # H4
+cairn health document attach-text ID TEXTFILE [--verified]  # H4
+cairn health document list                           # H4
 cairn health status
-cairn health report labs
-cairn health report current
-cairn health report visit-brief --since 2025-01-01
-cairn health doctor
+cairn health report labs                             # H1
+cairn health report event-response ID [--days N]     # H2
+cairn health report data-quality                     # H3
+cairn health report broken-refs                      # H4
+cairn health report current           # 後続（H5）
+cairn health report visit-brief --since 2025-01-01   # 後続（H5）
 ```
 
 H0では`init`と`doctor`を、H1では`import labs-csv`、`status`、`report labs`

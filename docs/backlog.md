@@ -28,9 +28,12 @@
 - 2026-07-12: H1 実データ検証（実検査シート 729観測、全 valid）+ 実フォーマット/カタログ拡張
   （PR #6）。H3 Apple Health 実装: streaming XML（allowlist 8型、位置情報除外、instant/
   interval、睡眠区間長）、`COPY FROM CSV` バルクロード（DuckDB per-row INSERT が実用外の
-  ため。~5,700行/s・メモリ一定）、日次/週次/データ品質集計、`import apple-export` /
-  `report data-quality`。catalog 2026.07-3、テスト 15 件追加で **590 passed**
-  残: 実データ検証（実 iPhone export、ACCEPTANCE 末尾）→ H4 医療文書
+  ため。~5,700行/s・メモリ一定）、日次/週次/データ品質集計。catalog 2026.07-3（PR #7）
+- 2026-07-12: H4 医療文書レジストリ実装。schema v3（documents）、不変スナップショット +
+  抽出ライフサイクル（none→draft→verified、verified は明示操作のみ。OCR 自体は後続）、
+  壊れた参照検出（`report broken-refs` + doctor の provenance_intact）、`import document` /
+  `document attach-text|list`。テスト 15 件追加で **602 passed**。実機 store は v3 へ migrate 済み
+  残: 実データ検証（実 iPhone export）→ H5 レポート配信（**凍結明け** + allowlist 第4カテゴリ + H5-P1）
 
 ## 採用基準
 
