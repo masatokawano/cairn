@@ -219,6 +219,20 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 別ハッシュの原本（月次 export の更新版等）では、新しい原本への provenance
 付きで改めて保留される。解決はエイリアスカタログの拡張 + mapping_version 更新で行う。
 
+### 2.12 Apple Health の格納（H3、observations を共用）
+
+高頻度データも `observations` に入れる（H-D1 により cairn.db からは独立）。
+Apple Health 固有の扱い:
+
+- マッピングは `metric_catalog.healthkit_identifier`（allowlist 8型）。
+  それ以外の型は取り込まず件数のみ計上。`Workout`/`WorkoutRoute` は完全除外
+- `original_metric` = HealthKit 型識別子、`source_name` = sourceName、
+  `device_name` = device 属性、`observed_start`/`observed_end` にタイムゾーン付き
+  時刻、`observed_date` = 開始日。`time_precision` = instant（start==end）/ interval
+- 睡眠（カテゴリ型）は区間長を分に換算して `value_num`、カテゴリ値を
+  `original_value`（例: HKCategoryValueSleepAnalysisAsleepCore）
+- `fingerprint` = 型/source/開始/終了/原値/単位。Apple の複数ソース重複を吸収し冪等
+
 ## 3. 派生ビュー
 
 - `v_latest_observation_by_metric`

@@ -3,7 +3,7 @@
 # §4.2: 誤ったコードを無理に付けない). Extend per-need, bump catalog_version.
 # canonical_unit values must match a normalized spelling in units.yml so the
 # importer can mark matching observations `valid` (identity normalization).
-catalog_version: "2026.07-2"
+catalog_version: "2026.07-3"
 
 metrics:
   # --- liver / protein ---
@@ -251,3 +251,53 @@ metrics:
     label_en: FEV1%
     quantity_kind: fraction
     canonical_unit: "%"
+
+  # --- Apple Health (H3 allowlist; mapped by healthkit_identifier) ---
+  step_count:
+    label_ja: 歩数
+    label_en: Step count
+    quantity_kind: count
+    canonical_unit: count
+    healthkit_identifier: HKQuantityTypeIdentifierStepCount
+  resting_heart_rate:
+    label_ja: 安静時心拍数
+    label_en: Resting heart rate
+    quantity_kind: rate
+    canonical_unit: count/min
+    healthkit_identifier: HKQuantityTypeIdentifierRestingHeartRate
+  heart_rate_variability:
+    label_ja: 心拍変動（SDNN）
+    label_en: Heart rate variability (SDNN)
+    quantity_kind: duration
+    canonical_unit: ms
+    healthkit_identifier: HKQuantityTypeIdentifierHeartRateVariabilitySDNN
+  body_mass:
+    label_ja: 体重
+    label_en: Body mass
+    quantity_kind: mass
+    canonical_unit: kg
+    healthkit_identifier: HKQuantityTypeIdentifierBodyMass
+  sleep_analysis:
+    label_ja: 睡眠
+    label_en: Sleep analysis
+    quantity_kind: duration
+    canonical_unit: min
+    healthkit_identifier: HKCategoryTypeIdentifierSleepAnalysis
+  blood_pressure_systolic:
+    label_ja: 収縮期血圧
+    label_en: Systolic blood pressure
+    quantity_kind: pressure
+    canonical_unit: mmHg
+    healthkit_identifier: HKQuantityTypeIdentifierBloodPressureSystolic
+  blood_pressure_diastolic:
+    label_ja: 拡張期血圧
+    label_en: Diastolic blood pressure
+    quantity_kind: pressure
+    canonical_unit: mmHg
+    healthkit_identifier: HKQuantityTypeIdentifierBloodPressureDiastolic
+  exercise_time:
+    label_ja: 運動時間
+    label_en: Exercise time
+    quantity_kind: duration
+    canonical_unit: min
+    healthkit_identifier: HKQuantityTypeIdentifierAppleExerciseTime

@@ -37,12 +37,17 @@ class Catalog:
     metrics: dict[str, Metric]
     aliases: dict[str, str]            # source spelling -> metric_id
     unit_spellings: dict[str, str] = field(default_factory=dict)
+    healthkit: dict[str, str] = field(default_factory=dict)  # HK id -> metric_id
 
     def resolve_metric(self, source_name: str) -> Metric | None:
         metric_id = self.aliases.get(source_name.strip())
         if metric_id is None:
             return None
         return self.metrics.get(metric_id)
+
+    def resolve_healthkit(self, hk_identifier: str) -> Metric | None:
+        metric_id = self.healthkit.get(hk_identifier)
+        return self.metrics.get(metric_id) if metric_id else None
 
     def canonical_unit_for(self, raw_unit: str | None) -> str | None:
         """Normalize a unit spelling; None when the unit is unknown."""
@@ -89,12 +94,16 @@ def load(directory: Path | None = None) -> Catalog:
     for spelling, canonical in (units_doc.get("spellings") or {}).items():
         unit_spellings[str(spelling)] = str(canonical)
 
+    healthkit = {m.healthkit_identifier: m.metric_id
+                 for m in metrics.values() if m.healthkit_identifier}
+
     return Catalog(
         catalog_version=str(metrics_doc["catalog_version"]),
         mapping_version=str(aliases_doc["mapping_version"]),
         metrics=metrics,
         aliases=aliases,
         unit_spellings=unit_spellings,
+        healthkit=healthkit,
     )
 
 

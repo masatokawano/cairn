@@ -17,13 +17,20 @@ from app.health.importers import labs_csv
 
 def test_logs_contain_no_values_metrics_or_paths(imported, catalog_dir,
                                                  labs_csv_path, caplog):
+    import re
+
     with caplog.at_level(logging.INFO, logger="cairn.health"):
         labs_csv.run(labs_csv_path, catalog_dir=catalog_dir)
     text = caplog.text
-    for leaked in ("1.23", "11", "23", "<5", "Synthetic", "Mystery",
-                   str(labs_csv_path)):
+    # Distinctive tokens only — bare ints like 11/23 collide with hex run-ids.
+    for leaked in ("1.23", "<5", "Synthetic", "Mystery", str(labs_csv_path)):
         assert leaked not in text, f"log leaked {leaked!r}"
-    assert "labs_csv import run=" in text     # counts and ids ARE logged
+    # The INFO line is a counts-only summary (no values, metric names, paths).
+    line = [m for m in caplog.messages if "labs_csv import run=" in m]
+    assert len(line) == 1
+    assert re.fullmatch(
+        r"labs_csv import run=[0-9a-f]{32} inserted=\d+ skipped=\d+ "
+        r"quarantined=\d+", line[0])
 
 
 def test_malformed_input_rolls_back_but_preserves_raw(health_home, catalog_dir,

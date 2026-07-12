@@ -15,6 +15,64 @@ from __future__ import annotations
 from datetime import timedelta
 
 
+def daily_summary(conn, metric_id: str) -> list[dict]:
+    """Per-day aggregate of a metric's numeric observations, regenerated from
+    the normalized rows (ACCEPTANCE H3). Non-numeric/provisional rows are
+    excluded from the numbers but counted."""
+    rows = conn.execute(
+        "SELECT observed_date, count(*) FILTER (WHERE value_num IS NOT NULL),"
+        "       count(*) FILTER (WHERE value_num IS NULL),"
+        "       min(value_num), max(value_num), avg(value_num),"
+        "       sum(value_num)"
+        " FROM observations WHERE metric_id = ? AND observed_date IS NOT NULL"
+        " GROUP BY observed_date ORDER BY observed_date",
+        [metric_id],
+    ).fetchall()
+    keys = ("date", "n", "n_excluded", "min", "max", "mean", "sum")
+    out = []
+    for r in rows:
+        d = dict(zip(keys, r))
+        if d["mean"] is not None:
+            d["mean"] = round(d["mean"], 4)
+        out.append(d)
+    return out
+
+
+def weekly_summary(conn, metric_id: str) -> list[dict]:
+    """Per-ISO-week aggregate, regenerated from the normalized rows."""
+    rows = conn.execute(
+        "SELECT strftime(observed_date, '%G-W%V') AS wk,"
+        "       count(*) FILTER (WHERE value_num IS NOT NULL),"
+        "       min(value_num), max(value_num), avg(value_num), sum(value_num)"
+        " FROM observations WHERE metric_id = ? AND observed_date IS NOT NULL"
+        " GROUP BY wk ORDER BY wk",
+        [metric_id],
+    ).fetchall()
+    keys = ("week", "n", "min", "max", "mean", "sum")
+    out = []
+    for r in rows:
+        d = dict(zip(keys, r))
+        if d["mean"] is not None:
+            d["mean"] = round(d["mean"], 4)
+        out.append(d)
+    return out
+
+
+def data_quality(conn) -> list[dict]:
+    """Per-metric coverage/quality: counts, date span, provisional share
+    (ACCEPTANCE H3 data-quality report). Counts only — no values."""
+    rows = conn.execute(
+        "SELECT metric_id,"
+        "       count(*),"
+        "       count(*) FILTER (WHERE quality_status='provisional'),"
+        "       count(DISTINCT source_name),"
+        "       min(observed_date), max(observed_date)"
+        " FROM observations GROUP BY metric_id ORDER BY metric_id"
+    ).fetchall()
+    keys = ("metric_id", "n", "provisional", "sources", "first", "last")
+    return [dict(zip(keys, r)) for r in rows]
+
+
 def current_events(conn) -> list[dict]:
     """Events not superseded by another entry (append-only chain heads)."""
     rows = conn.execute(
