@@ -97,12 +97,15 @@ The fixture contains synthetic records for:
 - [x] Workout routes and location-bearing records are excluded initially.
 - [x] Daily and weekly aggregates can be regenerated from normalized records.
 
-H3 verified 2026-07-12 with synthetic data (`tests/health/test_apple_health.py`;
-suite total 590 passed). Streaming confirmed memory-flat at ~73MB for 500k
-records. Bulk load uses `COPY FROM CSV` via a temp file in the protected home
-(DuckDB parameterized INSERT is ~700 rows/s; COPY brings the pipeline to
-~5,700 rows/s, parse-bound). Real-data verification (an actual iPhone export)
-is a still-open human step.
+H3 verified 2026-07-12 with synthetic data (`tests/health/test_apple_health.py`)
+AND a real iPhone export (1.2GB export.xml / 3.28M records, imported in ~30s,
+570,579 observations across steps/sleep/body-mass/blood-pressure/resting-HR
+from 9 sources, all valid). Real-data verification surfaced epoch-1970
+sentinel dates written by a third-party source; these are now quarantined
+(reason `sentinel_date`) instead of polluting the timeline. HRV and exercise
+time were absent from that export (not an allowlist gap). Streaming confirmed
+memory-flat; bulk load uses `COPY FROM CSV` via a temp file in the protected
+home (DuckDB parameterized INSERT is ~700 rows/s; COPY is parse-bound).
 
 ## H4 — Documents and provenance
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -172,8 +173,9 @@ def run(source: str | Path, *, catalog_dir: Path | None = None,
         [run_id, source_file_id, now],
     )
 
-    inserted = skipped = 0
+    inserted = skipped = quarantined = 0
     ignored_types: dict[str, int] = {}
+    quarantine_rows: list[list] = []
     stream, zf = _open_xml_stream(src)
     # Temp CSV staging file inside the protected home (0600). Rows stream here
     # during parse; one COPY bulk-loads them. Deleted in every exit path.
@@ -181,10 +183,23 @@ def run(source: str | Path, *, catalog_dir: Path | None = None,
     try:
         # Seen fingerprints already in the store for this source (idempotent
         # re-import) plus those seen in THIS pass (within-export duplicates).
+        # Includes previously quarantined records (their fingerprint is kept
+        # in payload_json) so a sentinel isn't re-quarantined on re-import.
         seen: set[str] = {r[0] for r in conn.execute(
             "SELECT fingerprint FROM observations WHERE source_file_id=?",
             [source_file_id],
         ).fetchall()}
+        for (payload,) in conn.execute(
+            "SELECT payload_json FROM quarantine_records"
+            " WHERE source_file_id=? AND payload_json IS NOT NULL",
+            [source_file_id],
+        ).fetchall():
+            try:
+                fpq = json.loads(payload).get("fingerprint")
+            except (ValueError, AttributeError):
+                fpq = None
+            if fpq:
+                seen.add(fpq)
 
         fd = os.open(tmp_csv, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", newline="", encoding="utf-8") as csv_fh:
@@ -222,7 +237,21 @@ def run(source: str | Path, *, catalog_dir: Path | None = None,
 
                 start_dt = _parse_dt(start_s)
                 end_dt = _parse_dt(end_s)
-                observed_date = start_dt.date() if start_dt else None
+                # Epoch-zero (1970) is a well-known sentinel some third-party
+                # sources write for records with no real timestamp; HealthKit
+                # itself postdates 2014. Such a date would pollute the timeline
+                # and aggregates, so the record is quarantined (fact preserved,
+                # counted) rather than inserted or silently dropped.
+                if start_dt is None or start_dt.year <= 1970:
+                    quarantine_rows.append(
+                        [uuid.uuid4().hex, source_file_id, run_id,
+                         "sentinel_date", hk_type, raw_unit,
+                         f"start={start_s}",
+                         json.dumps({"fingerprint": fp}), now])
+                    quarantined += 1
+                    root.clear()
+                    continue
+                observed_date = start_dt.date()
                 precision = "instant" if start_dt == end_dt else "interval"
 
                 if hk_type == SLEEP_TYPE:
@@ -266,6 +295,14 @@ def run(source: str | Path, *, catalog_dir: Path | None = None,
                 "(FORMAT CSV, HEADER false, NULLSTR '', QUOTE '\"', ESCAPE '\"')",
                 [str(tmp_csv)],
             )
+        if quarantine_rows:
+            conn.executemany(
+                "INSERT INTO quarantine_records (id, source_file_id,"
+                " import_run_id, reason_code, original_metric, original_unit,"
+                " source_row_ref, payload_json, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                quarantine_rows,
+            )
         conn.execute("COMMIT")
     except Exception as exc:
         try:
@@ -294,19 +331,21 @@ def run(source: str | Path, *, catalog_dir: Path | None = None,
     ignored_count = sum(ignored_types.values())
     conn.execute(
         "UPDATE import_runs SET completed_at=?, inserted=?, skipped=?,"
-        " status='ok' WHERE id=?",
-        [datetime.now(timezone.utc), inserted, skipped, run_id],
+        " quarantined=?, status=? WHERE id=?",
+        [datetime.now(timezone.utc), inserted, skipped, quarantined,
+         "ok" if quarantined == 0 else "partial", run_id],
     )
     conn.close()
 
     logger.info("apple_health import run=%s inserted=%d skipped=%d "
-                "ignored_types=%d ignored_records=%d", run_id, inserted,
-                skipped, len(ignored_types), ignored_count)
+                "quarantined=%d ignored_types=%d ignored_records=%d", run_id,
+                inserted, skipped, quarantined, len(ignored_types), ignored_count)
     return {
         "run_id": run_id,
         "source_sha256": digest[:16],
         "inserted": inserted,
         "skipped": skipped,
+        "quarantined": quarantined,
         "ignored_type_count": len(ignored_types),
         "ignored_record_count": ignored_count,
         "mapping_version": cat.mapping_version,

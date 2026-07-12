@@ -28,6 +28,10 @@
  <!-- sleep analysis: category record, duration derived from the span -->
  <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Apple Watch" value="HKCategoryValueSleepAnalysisAsleepCore" startDate="2031-06-01 23:00:00 +0900" endDate="2031-06-02 01:00:00 +0900"/>
 
+ <!-- sentinel epoch-1970 date: allowlisted type but bogus timestamp,
+      must be quarantined (not inserted, not silently dropped) -->
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="ThirdPartyApp" unit="count" startDate="1970-01-01 09:00:00 +0900" endDate="1970-01-01 10:00:00 +0900" value="999"/>
+
  <!-- NOT allowlisted: must be counted and dropped, value never read -->
  <Record type="HKQuantityTypeIdentifierDietaryCaffeine" sourceName="iPhone" unit="mg" startDate="2031-06-01 09:00:00 +0900" endDate="2031-06-01 09:00:00 +0900" value="95"/>
  <Record type="HKQuantityTypeIdentifierEnvironmentalAudioExposure" sourceName="Apple Watch" unit="dBASPL" startDate="2031-06-01 10:00:00 +0900" endDate="2031-06-01 10:05:00 +0900" value="72"/>
