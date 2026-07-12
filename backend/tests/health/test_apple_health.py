@@ -34,9 +34,11 @@ def ah_imported(health_home):
 
 def test_allowlist_only_and_dedup(ah_imported):
     home, stats = ah_imported
-    # 11 allowlisted records in the fixture, minus 1 exact duplicate = 10.
+    # 12 allowlisted records: 1 exact duplicate skipped, 1 epoch-1970
+    # sentinel quarantined, 10 inserted.
     assert stats["inserted"] == 10
     assert stats["skipped"] == 1
+    assert stats["quarantined"] == 1
     # Two non-allowlisted types are counted, values never read.
     assert stats["ignored_type_count"] == 2
     assert stats["ignored_record_count"] == 2
@@ -120,8 +122,21 @@ def test_reimport_is_idempotent(ah_imported):
     home, _ = ah_imported
     again = apple_health.run(EXPORT_XML)
     assert again["inserted"] == 0
-    assert again["skipped"] == 11        # all 11 allowlisted records seen
+    assert again["quarantined"] == 0     # sentinel already seen, not re-quarantined
+    assert again["skipped"] == 12        # all 12 allowlisted records seen
     assert _rows(home, "SELECT count(*) FROM observations")[0][0] == 10
+
+
+def test_sentinel_epoch_date_quarantined_not_inserted(ah_imported):
+    home, _ = ah_imported
+    # The 1970 step record is quarantined, so no observation carries a 1970
+    # date and the step timeline stays clean.
+    assert _rows(home,
+        "SELECT count(*) FROM observations WHERE observed_date < DATE '2000-01-01'"
+    )[0][0] == 0
+    q = _rows(home,
+        "SELECT reason_code, original_metric FROM quarantine_records")
+    assert q == [("sentinel_date", "HKQuantityTypeIdentifierStepCount")]
 
 
 def test_import_from_zip_stream(health_home, tmp_path):
@@ -164,4 +179,4 @@ def test_logs_carry_no_values(health_home, caplog):
     assert len(line) == 1
     assert re.fullmatch(
         r"apple_health import run=[0-9a-f]{32} inserted=\d+ skipped=\d+ "
-        r"ignored_types=\d+ ignored_records=\d+", line[0])
+        r"quarantined=\d+ ignored_types=\d+ ignored_records=\d+", line[0])
