@@ -58,6 +58,49 @@ def weekly_summary(conn, metric_id: str) -> list[dict]:
     return out
 
 
+def broken_references(conn, home) -> list[dict]:
+    """Rows whose provenance no longer resolves on disk (H4).
+
+    Detects two failure modes: a source_files row whose raw snapshot is
+    missing, and a document whose ``extracted_text_path`` is missing. Reports
+    ids and kinds only — no clinical content. ``home`` is the data home root
+    the stored paths are relative to.
+    """
+    from pathlib import Path
+
+    home = Path(home)
+    broken: list[dict] = []
+    for sid, kind, stored in conn.execute(
+        "SELECT id, source_kind, stored_path FROM source_files"
+    ).fetchall():
+        if not (home / stored).exists():
+            n_obs = conn.execute(
+                "SELECT count(*) FROM observations WHERE source_file_id=?", [sid]
+            ).fetchone()[0]
+            broken.append({"kind": "missing_source_snapshot",
+                           "source_file_id": sid, "source_kind": kind,
+                           "observations_affected": n_obs})
+    for did, path in conn.execute(
+        "SELECT id, extracted_text_path FROM documents"
+        " WHERE extracted_text_path IS NOT NULL"
+    ).fetchall():
+        if not (home / path).exists():
+            broken.append({"kind": "missing_extracted_text",
+                           "document_id": did})
+    return broken
+
+
+def documents(conn) -> list[dict]:
+    """Registered documents with metadata only (no extracted text body)."""
+    rows = conn.execute(
+        "SELECT id, document_kind, title, document_date, issuer,"
+        "       extraction_status FROM documents"
+        " ORDER BY document_date NULLS LAST, id"
+    ).fetchall()
+    keys = ("id", "kind", "title", "date", "issuer", "extraction_status")
+    return [dict(zip(keys, r)) for r in rows]
+
+
 def data_quality(conn) -> list[dict]:
     """Per-metric coverage/quality: counts, date span, provisional share
     (ACCEPTANCE H3 data-quality report). Counts only — no values."""

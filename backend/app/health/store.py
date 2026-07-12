@@ -82,6 +82,7 @@ def counts(conn) -> dict:
         "import_runs",
         "observations",
         "events",
+        "documents",
         "quarantine_records",
         "metric_catalog",
         "metric_aliases",

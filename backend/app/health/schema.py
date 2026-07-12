@@ -18,7 +18,7 @@ Column notes:
 """
 from __future__ import annotations
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -157,8 +157,28 @@ CREATE TABLE IF NOT EXISTS events (
 );
 """
 
+# v3 (H4): medical document registry. The document file is snapshotted
+# immutably into raw/ (source_files carries hash/size/kind); this row adds
+# clinical metadata and an extraction lifecycle. extraction_status is
+# 'none' at import and only becomes 'verified' by an explicit human action —
+# OCR/extracted text is never silently trusted (ACCEPTANCE H4).
+DOCUMENTS_DDL = """
+CREATE TABLE IF NOT EXISTS documents (
+    id                  TEXT PRIMARY KEY,
+    document_kind       TEXT NOT NULL,          -- lab_report / imaging / endoscopy / prescription ...
+    title               TEXT NOT NULL,
+    document_date       DATE,
+    source_file_id      TEXT NOT NULL,          -- immutable raw snapshot
+    issuer              TEXT,
+    extracted_text_path TEXT,                   -- relative to the data home
+    extraction_status   TEXT NOT NULL DEFAULT 'none',  -- none / draft / verified
+    imported_at         TIMESTAMPTZ NOT NULL,
+    meta_json           TEXT
+);
+"""
+
 # version -> DDL applied when upgrading TO that version (additive only).
-MIGRATIONS: dict[int, str] = {2: EVENTS_DDL}
+MIGRATIONS: dict[int, str] = {2: EVENTS_DDL, 3: DOCUMENTS_DDL}
 
 
 def apply(conn) -> None:
