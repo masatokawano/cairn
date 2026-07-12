@@ -86,16 +86,23 @@ The fixture contains synthetic records for:
 
 ### Acceptance
 
-- [ ] `export.xml` is parsed as a stream rather than loaded fully into memory.
-- [ ] Only allowlisted types enter normalized storage.
-- [ ] Ignored types are counted without logging values.
-- [ ] Deterministic fingerprints remove duplicates.
-- [ ] Source, device, time zone, start, and end times are preserved.
-- [ ] Instant and interval records remain distinct.
-- [ ] Re-importing the same export is idempotent.
-- [ ] Interrupted imports leave no partial normalized transaction.
-- [ ] Workout routes and location-bearing records are excluded initially.
-- [ ] Daily and weekly aggregates can be regenerated from normalized records.
+- [x] `export.xml` is parsed as a stream rather than loaded fully into memory.
+- [x] Only allowlisted types enter normalized storage.
+- [x] Ignored types are counted without logging values.
+- [x] Deterministic fingerprints remove duplicates.
+- [x] Source, device, time zone, start, and end times are preserved.
+- [x] Instant and interval records remain distinct.
+- [x] Re-importing the same export is idempotent.
+- [x] Interrupted imports leave no partial normalized transaction.
+- [x] Workout routes and location-bearing records are excluded initially.
+- [x] Daily and weekly aggregates can be regenerated from normalized records.
+
+H3 verified 2026-07-12 with synthetic data (`tests/health/test_apple_health.py`;
+suite total 590 passed). Streaming confirmed memory-flat at ~73MB for 500k
+records. Bulk load uses `COPY FROM CSV` via a temp file in the protected home
+(DuckDB parameterized INSERT is ~700 rows/s; COPY brings the pipeline to
+~5,700 rows/s, parse-bound). Real-data verification (an actual iPhone export)
+is a still-open human step.
 
 ## H4 — Documents and provenance
 

@@ -23,3 +23,6 @@ sqlite-vec>=0.1.6
 duckdb>=1.5
 # H0: health metric catalog files (app/health/catalog/*.yml).
 pyyaml>=6.0
+# H3: duckdb needs pytz to materialize TIMESTAMPTZ (Apple Health records
+# carry a UTC offset) back into Python datetimes.
+pytz>=2024.1

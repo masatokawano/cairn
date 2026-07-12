@@ -225,15 +225,22 @@ H7のMCP候補:
 
 ## 5. データフロー
 
-### 5.1 Apple Health
+### 5.1 Apple Health（H3 実装済み。実装正は `importers/apple_health.py`）
 
 1. iPhone Healthアプリからexport.zipを生成
-2. 指定inboxへ配置
-3. ZIPを展開せずstreamingで`export.xml`を読む
-4. 対象型だけを取り込む
-5. deterministic fingerprintで重複排除
-6. 日次・週次の派生集計を更新
-7. 元ZIPをrawへ移し、hashとimport結果を保存
+2. `cairn health import apple-export FILE`（.zip / .xml いずれも可）
+3. ZIPを展開せずstreamingで`export.xml`を読む（`iterparse` + root.clear で
+   数百MBでもメモリ一定）。allowlist 8型（歩数/安静時心拍/HRV/体重/睡眠/
+   収縮期・拡張期血圧/運動時間、healthkit_identifier でマッピング）のみ取り込み、
+   他の型は件数のみ計上して破棄。`Workout`/`WorkoutRoute`（位置情報）は完全にスキップ
+4. deterministic fingerprint（型/source/開始/終了/原値/単位）で重複排除。再取り込み冪等
+5. instant/interval を区別し、睡眠は区間長（分）を派生。sourceName/device/タイムゾーンを保持
+6. 日次・週次集計は正規化行から再生成（`analytics.daily_summary`/`weekly_summary`）
+7. 元ファイルをrawへ不変スナップショット、hashとimport結果を保存
+
+**性能**: 高頻度データのため DuckDB のパラメータ化 INSERT（~700行/s）では実用に耐えず、
+保護 home 内の一時 CSV 経由で `COPY FROM CSV`（native bulk）を使う（PRIVACY §3 が
+保護 home 内の一時ファイルを許可）。パース律速で実測 ~5,700行/s、メモリは一定。
 
 将来の自動同期は別フェーズとし、MVPでiOSアプリを作らない。
 

@@ -145,6 +145,24 @@ def import_labs_csv(
     _echo(stats)
 
 
+@import_app.command("apple-export")
+def import_apple_export(
+    file: Path = typer.Argument(..., help="Apple Health export.zip or export.xml."),
+) -> None:
+    """Import allowlisted Apple Health record types (H3, streaming)."""
+    from .importers import apple_health
+
+    try:
+        stats = apple_health.run(file)
+    except apple_health.AppleHealthError as exc:
+        typer.echo(f"import failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.echo(f"import failed: {type(exc).__name__}", err=True)
+        raise typer.Exit(code=1)
+    _echo(stats)
+
+
 @import_app.command("events")
 def import_events(
     file: Path = typer.Argument(..., help="Event ledger YAML (append-only;"
@@ -192,6 +210,18 @@ def report_labs() -> None:
     from .reports import lab_summary
 
     _echo(lab_summary.write())
+
+
+@report_app.command("data-quality")
+def report_data_quality() -> None:
+    """Per-metric coverage and quality (counts only, no values)."""
+    from . import analytics, config, store
+
+    conn = store.connect(config.resolve_home())
+    try:
+        _echo({"metrics": analytics.data_quality(conn)})
+    finally:
+        conn.close()
 
 
 @report_app.command("event-response")

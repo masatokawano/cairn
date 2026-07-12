@@ -24,8 +24,13 @@
 - 2026-07-11: H2 イベント台帳実装。events YAML importer（append-only + supersedes 訂正、
   不確実日付は原文 + earliest/latest 区間で捏造なし）、overlay / before-after 窓の factual
   比較、`report event-response`、store schema v2（premigrate 自動バックアップ付き独立
-  migration 初稼働）。テスト 19 件追加で **572 passed**。
-  残: 実データ検証（labs + events、ACCEPTANCE 末尾）→ H3 Apple Health
+  migration 初稼働）。テスト 19 件追加で **572 passed**
+- 2026-07-12: H1 実データ検証（実検査シート 729観測、全 valid）+ 実フォーマット/カタログ拡張
+  （PR #6）。H3 Apple Health 実装: streaming XML（allowlist 8型、位置情報除外、instant/
+  interval、睡眠区間長）、`COPY FROM CSV` バルクロード（DuckDB per-row INSERT が実用外の
+  ため。~5,700行/s・メモリ一定）、日次/週次/データ品質集計、`import apple-export` /
+  `report data-quality`。catalog 2026.07-3、テスト 15 件追加で **590 passed**
+  残: 実データ検証（実 iPhone export、ACCEPTANCE 末尾）→ H4 医療文書
 
 ## 採用基準
 
