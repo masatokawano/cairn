@@ -17,4 +17,8 @@ export.zip
 apple_health_export*
 *.duckdb
 health*.csv
+*検査*.csv
 *visit-brief*.md
+lab-summary.md
+event-response-*.md
+*.parquet

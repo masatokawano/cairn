@@ -2,15 +2,19 @@
 per row (H1, docs/health/DESIGN.md §5.2, ACCEPTANCE.md H1).
 
 Accepted layout (the manual-export contract; header names may be Japanese
-or English):
+or English, and label columns may appear in any order before the dates):
 
-    項目,単位,基準値,2031-02-03,2031-08-19,...
-    Synthetic-A,arb-U/L,10-30,11,23
+    項目名,項目略称,単位,基準値範囲,基準値MIN,基準値MAX,6/22/2006,3/8/2008,...
+    クレアチニン,Cr,mg/dL,0.60-1.10,0.60,1.10,0.9,0.8
 
-- ``項目``/``metric``/``item``     — verbatim metric name (required, first)
-- ``単位``/``unit``               — optional
-- ``基準値``/``reference``        — optional; per-ROW text like ``10-30``
-- every remaining column must parse as a date (YYYY-MM-DD or YYYY/MM/DD)
+- ``項目``/``項目名``/``metric``/``item``  — verbatim metric name (required, first)
+- ``項目略称``/``略称``/``abbr``            — optional; a fallback alias key
+- ``単位``/``unit``                        — optional
+- ``基準値``/``基準値範囲``/``reference``   — optional; per-ROW text like ``10-30``
+- ``基準値MIN``/``基準値MAX``               — optional; structured bounds that
+  take precedence over parsing the range text
+- every remaining column must parse as a date
+  (YYYY-MM-DD, YYYY/MM/DD, or M/D/YYYY)
 
 A reference-range change over time is represented by the SAME metric on a
 second row with the new range and its values under the applicable date
@@ -55,9 +59,15 @@ PARSER_VERSION = "1"
 SUBJECT_ID = "self"
 DEFAULT_SOURCE_NAME = "lab_sheet"
 
-_METRIC_HEADERS = {"項目", "metric", "item"}
+_METRIC_HEADERS = {"項目", "項目名", "metric", "item"}
+# A second, abbreviated name column (real Japanese lab sheets carry both a
+# full name and an abbreviation, e.g. クレアチニン / Cr). Recognized so it is
+# not mistaken for a date, and used as a fallback alias key.
+_ABBREV_HEADERS = {"項目略称", "略称", "abbr", "abbreviation"}
 _UNIT_HEADERS = {"単位", "unit"}
-_REFERENCE_HEADERS = {"基準値", "reference"}
+_REFERENCE_HEADERS = {"基準値", "基準値範囲", "reference", "reference_range"}
+_REF_MIN_HEADERS = {"基準値min", "基準値下限", "ref_min", "reference_min"}
+_REF_MAX_HEADERS = {"基準値max", "基準値上限", "ref_max", "reference_max"}
 _RANGE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*[-−–~〜]\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
@@ -65,8 +75,20 @@ class LabsCsvError(Exception):
     """Malformed input; the caller rolls back normalized writes."""
 
 
+class HeaderCols:
+    """Resolved column indexes from the header row."""
+
+    __slots__ = ("abbrev", "unit", "reference", "ref_min", "ref_max", "dates")
+
+    def __init__(self):
+        self.abbrev = self.unit = self.reference = None
+        self.ref_min = self.ref_max = None
+        self.dates: list[tuple[int, date]] = []
+
+
 def _parse_date(text: str) -> date | None:
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+    # ISO first, then the US M/D/Y layout real spreadsheets export.
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%m/%d/%y"):
         try:
             return datetime.strptime(text.strip(), fmt).date()
         except ValueError:
@@ -74,36 +96,57 @@ def _parse_date(text: str) -> date | None:
     return None
 
 
-def _parse_header(header: list[str]) -> tuple[int | None, int | None, list[tuple[int, date]]]:
-    """Return (unit_col, reference_col, [(col_index, date), ...])."""
+def _parse_header(header: list[str]) -> HeaderCols:
     if not header or header[0].strip() not in _METRIC_HEADERS:
-        raise LabsCsvError("first column must be the metric name (項目/metric/item)")
-    unit_col = reference_col = None
-    date_cols: list[tuple[int, date]] = []
+        raise LabsCsvError(
+            "first column must be the metric name (項目/項目名/metric/item)")
+    cols = HeaderCols()
     for idx, name in enumerate(header[1:], start=1):
         cleaned = name.strip()
-        if cleaned in _UNIT_HEADERS and unit_col is None:
-            unit_col = idx
-        elif cleaned in _REFERENCE_HEADERS and reference_col is None:
-            reference_col = idx
+        low = cleaned.lower()
+        if cleaned in _ABBREV_HEADERS and cols.abbrev is None:
+            cols.abbrev = idx
+        elif cleaned in _UNIT_HEADERS and cols.unit is None:
+            cols.unit = idx
+        elif cleaned in _REFERENCE_HEADERS and cols.reference is None:
+            cols.reference = idx
+        elif low in _REF_MIN_HEADERS and cols.ref_min is None:
+            cols.ref_min = idx
+        elif low in _REF_MAX_HEADERS and cols.ref_max is None:
+            cols.ref_max = idx
         else:
             parsed = _parse_date(cleaned)
             if parsed is None:
-                raise LabsCsvError(f"header column {idx} is neither 単位/基準値 nor a date")
-            date_cols.append((idx, parsed))
-    if not date_cols:
+                raise LabsCsvError(
+                    f"header column {idx} is neither a known label nor a date")
+            cols.dates.append((idx, parsed))
+    if not cols.dates:
         raise LabsCsvError("no date columns found in header")
-    return unit_col, reference_col, date_cols
+    return cols
 
 
-def _parse_reference(text: str | None) -> tuple[float | None, float | None, str | None]:
-    if not text or not text.strip():
-        return None, None, None
-    cleaned = text.strip()
-    match = _RANGE_RE.match(cleaned)
-    if match:
-        return float(match.group(1)), float(match.group(2)), cleaned
-    return None, None, cleaned
+def _cell(cells: list[str], idx: int | None) -> str | None:
+    if idx is None or idx >= len(cells):
+        return None
+    value = cells[idx].strip()
+    return value or None
+
+
+def _resolve_reference(cells: list[str], cols: HeaderCols
+                       ) -> tuple[float | None, float | None, str | None]:
+    """Prefer explicit 基準値MIN/MAX columns; fall back to parsing a range
+    text like ``5-45``. Returns (low, high, text)."""
+    text = _cell(cells, cols.reference)
+    lo = _try_float(_cell(cells, cols.ref_min) or "")
+    hi = _try_float(_cell(cells, cols.ref_max) or "")
+    if lo is not None or hi is not None:
+        return lo, hi, text
+    if text:
+        match = _RANGE_RE.match(text)
+        if match:
+            return float(match.group(1)), float(match.group(2)), text
+        return None, None, text
+    return None, None, None
 
 
 def _try_float(text: str) -> float | None:
@@ -183,7 +226,7 @@ def run(source: str | Path, *, source_name: str = DEFAULT_SOURCE_NAME,
             header = next(reader, None)
             if header is None:
                 raise LabsCsvError("empty file")
-            unit_col, reference_col, date_cols = _parse_header(header)
+            cols = _parse_header(header)
 
             for row_idx, cells in enumerate(reader, start=2):
                 if not cells or not cells[0].strip():
@@ -191,12 +234,16 @@ def run(source: str | Path, *, source_name: str = DEFAULT_SOURCE_NAME,
                 if len(cells) > len(header):
                     raise LabsCsvError(f"row {row_idx} has more cells than the header")
                 original_metric = cells[0].strip()
-                raw_unit = (cells[unit_col].strip() or None) if unit_col is not None and unit_col < len(cells) else None
-                raw_reference = cells[reference_col] if reference_col is not None and reference_col < len(cells) else None
-                ref_low, ref_high, ref_text = _parse_reference(raw_reference)
+                raw_unit = _cell(cells, cols.unit)
+                ref_low, ref_high, ref_text = _resolve_reference(cells, cols)
+                # Map on the full name, then fall back to the abbreviation.
                 metric = cat.resolve_metric(original_metric)
+                if metric is None:
+                    abbrev = _cell(cells, cols.abbrev)
+                    if abbrev:
+                        metric = cat.resolve_metric(abbrev)
 
-                for col_idx, observed in date_cols:
+                for col_idx, observed in cols.dates:
                     raw_value = cells[col_idx].strip() if col_idx < len(cells) else ""
                     if not raw_value:
                         continue  # blank: nothing is invented

@@ -2,15 +2,40 @@
 # not normalize to the metric's canonical unit yields NO converted value
 # (original preserved, observation provisional). Conversions are a later
 # phase; do NOT add ratios here without a Decision.
+#
+# 'spellings' maps a raw source spelling to a canonical token (which must
+# appear in 'canonical'). Real sheets use lowercase l, fullwidth ｍ, and a
+# 'mEg/dL' typo for mEq/L — normalized here so matching values become valid.
 canonical:
   - mg/dL
   - g/dL
+  - μg/dL
   - U/L
+  - U
+  - IU/mL
+  - ng/mL
+  - mEq/L
   - mL/min/1.73m2
+  - mL
+  - fL
+  - pg
   - "%"
+  - "*10000/μl"
+  - "*100/μl"
 
 spellings:
   "ｍｇ/ｄＬ": mg/dL
   "mg/dl": mg/dL
+  "g/dl": g/dL
+  "μg/dl": μg/dL
+  "ug/dL": μg/dL
   "IU/L": U/L
+  "IU/l": U/L
+  "iu/l": U/L
   "u/l": U/L
+  "mEq/dL": mEq/L
+  "mEg/dL": mEq/L
+  "mEq/l": mEq/L
+  "fl": fL
+  "ｍL": mL
+  "ml": mL
