@@ -27,6 +27,13 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
+# Free text from the health store (source names from Apple Health devices,
+# event labels, verbatim lab values) is untrusted for markdown purposes
+# (AGENTS.md invariant 4): _esc collapses newlines and escapes inline
+# metacharacters including `|`, so a hostile string can neither break a
+# table nor spoof structure (every emit position is prefixed, so a leading
+# '#' can never reach line start either).
+from ...deliver.auto_lists import _esc
 from .. import analytics, config, store
 
 TEMPLATE_VERSION = "1"
@@ -73,23 +80,23 @@ def build_current_status(conn, *, now: datetime) -> str:
               "| metric | date | value | unit | reference | quality | source |",
               "|---|---|---|---|---|---|---|"]
     for metric_id, d, value, unit, ref, quality, source_name in latest:
-        lines.append(f"| {metric_id} | {d.isoformat()} | {value} |"
-                     f" {unit or ''} | {ref or ''} | {quality} | {source_name} |")
+        lines.append(f"| {metric_id} | {d.isoformat()} | {_esc(value)} |"
+                     f" {_esc(unit)} | {_esc(ref)} | {quality} | {_esc(source_name)} |")
     lines += ["", "## 進行中のイベント", ""]
     active = [e for e in events if e["status"] == "active"]
     if active:
         for e in active:
-            dose = (f" {e['dose_value']}{e['dose_unit']}"
+            dose = (f" {e['dose_value']}{_esc(e['dose_unit'])}"
                     if e["dose_value"] is not None else "")
-            lines.append(f"- {e['kind']}: {e['label'] or e['id']}{dose}"
-                         f"（{e['start_raw']}〜, {e['confidence']}）")
+            lines.append(f"- {e['kind']}: {_esc(e['label'] or e['id'])}{dose}"
+                         f"（{_esc(e['start_raw'])}〜, {e['confidence']}）")
     else:
         lines.append("- なし（またはイベント台帳が未入力）")
     uncertain = [e for e in events if e["status"] == "uncertain"]
     if uncertain:
         lines += ["", "## 開始時期が不確実なイベント", ""]
         for e in uncertain:
-            lines.append(f"- {e['kind']}: {e['label'] or e['id']}（開始不明のまま記録）")
+            lines.append(f"- {e['kind']}: {_esc(e['label'] or e['id'])}（開始不明のまま記録）")
     lines.append("")
     return "\n".join(lines)
 
@@ -128,9 +135,9 @@ def build_timeline(conn, *, now: datetime, lab_dates: int = 8,
     lines += ["## イベント（介入・文脈）", ""]
     if events:
         for e in events:
-            span = f"{e['start_raw'] or '開始不明'}" + (
-                f" 〜 {e['end_raw']}" if e["end_raw"] else "〜")
-            lines.append(f"- {span}: {e['kind']} — {e['label'] or e['id']}")
+            span = f"{_esc(e['start_raw']) or '開始不明'}" + (
+                f" 〜 {_esc(e['end_raw'])}" if e["end_raw"] else "〜")
+            lines.append(f"- {span}: {e['kind']} — {_esc(e['label'] or e['id'])}")
     else:
         lines.append("- 未入力（events.yml を編集して import してください）")
     lines += ["", f"## 検査値（直近 {len(dates)} 検査日・source facts）", ""]
@@ -139,7 +146,7 @@ def build_timeline(conn, *, now: datetime, lab_dates: int = 8,
         if d != current_date:
             lines += [f"### {d.isoformat()}", ""]
             current_date = d
-        lines.append(f"- {metric_id}: {value} {unit or ''}")
+        lines.append(f"- {metric_id}: {_esc(value)} {_esc(unit)}")
     lines += ["", f"## 高頻度指標の月次集計（直近 {months} ヶ月・derived）", ""]
     for metric_id, rows in monthly.items():
         if not rows:
@@ -175,14 +182,14 @@ def build_lab_trends(conn, *, now: datetime, per_metric: int = 10) -> str:
         lines += [f"### {metric_id}", "",
                   "| date | value | unit | reference |", "|---|---|---|---|"]
         for d, value, unit, ref in rows:
-            lines.append(f"| {d.isoformat()} | {value} | {unit or ''} | {ref or ''} |")
+            lines.append(f"| {d.isoformat()} | {_esc(value)} | {_esc(unit)} | {_esc(ref)} |")
         lines.append("")
     # A single measurement is a point, not a series — kept apart so the
     # layout itself cannot suggest a course over time.
     lines += ["## 単発の測定（1回のみ・経過ではない）", ""]
     if singles:
         for metric_id, ((d, value, unit, ref),) in singles.items():
-            lines.append(f"- {metric_id}: {d.isoformat()} {value} {unit or ''}")
+            lines.append(f"- {metric_id}: {d.isoformat()} {_esc(value)} {_esc(unit)}")
     else:
         lines.append("- なし")
     lines.append("")

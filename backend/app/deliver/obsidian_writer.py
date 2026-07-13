@@ -1,7 +1,7 @@
 """Obsidian vault writer — the ONLY path that writes into the vault.
 
 Invariant 2 (AGENTS.md / DESIGN.md §5.5): writes are restricted to exactly
-three destinations, enforced here by an allowlist plus path validation. No
+four destinations, enforced here by an allowlist plus path validation. No
 other module may write to the vault, and this set must never be widened
 without a Decision Record change.
 
@@ -10,6 +10,7 @@ without a Decision Record change.
     "auto"     90 Auto/                     overwrite allowed
     "weekly"   40 Reviews/Weekly/           new file only
     "draft"    00 Inbox/AI Drafts/          new file only
+    "health"   90 Auto/Health/              overwrite allowed (H5, ADR-0005)
 
 Threat model: the destination directories are constants and the vault root
 comes from trusted config, but filenames (and content) can be derived from
