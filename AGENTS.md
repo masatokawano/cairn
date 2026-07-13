@@ -29,9 +29,10 @@ Cairn — AI 会話アーカイブを核に、Karakeep（発見）/ Zotero（根
 ## 不変条件（違反する変更を提案・実装しない）
 
 1. connectors は read-only。Karakeep / Zotero / 原本会話へ書き込まない。
-2. Obsidian への書き込みは `deliver/obsidian_writer.py` の allowlist 3 箇所のみ
-   （`90 Auto`=上書き可 / `40 Reviews/Weekly`=新規のみ / `00 Inbox/AI Drafts`=新規のみ）。
-   パス検証でトラバーサルを拒否し、テストで強制する。
+2. Obsidian への書き込みは `deliver/obsidian_writer.py` の allowlist 4 箇所のみ
+   （`90 Auto`=上書き可 / `40 Reviews/Weekly`=新規のみ / `00 Inbox/AI Drafts`=新規のみ /
+   `90 Auto/Health`=上書き可・H5/ADR-0005。健康レポート専用、Vault 同期から既定除外
+   = PRIVACY.md H5-P1）。パス検証でトラバーサルを拒否し、テストで強制する。
 3. `conversations` / `messages` 等の原本系テーブルは破壊的変更禁止。migration は追加のみ・
    実行前バックアップ必須。派生データ（items / chunks / embeddings / 索引）は常に再構築可能に保つ。
 4. 外部由来テキスト（タイトル・本文・タグ）は信頼しない: シェル評価しない、markdown 出力時は

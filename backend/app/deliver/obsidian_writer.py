@@ -43,10 +43,16 @@ import tempfile
 from pathlib import Path
 
 # category -> (subdirectory under the External Brain folder, overwrite_allowed)
+# "health" (H5, ADR-0005): inside the existing 90 Auto tree — the writable
+# area does not grow, only the entry count (health/DESIGN.md H-D7). Health
+# reports carry real measurements; the folder is excluded from every vault
+# sync by default (PRIVACY.md §10 H5-P1) and is NOT indexed by the Obsidian
+# connector (90 Auto is outside the indexed set — no self-ingestion loop).
 ALLOWLIST: dict[str, tuple[str, bool]] = {
     "auto": ("90 Auto", True),
     "weekly": ("40 Reviews/Weekly", False),
     "draft": ("00 Inbox/AI Drafts", False),
+    "health": ("90 Auto/Health", True),
 }
 
 

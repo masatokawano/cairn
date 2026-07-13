@@ -33,7 +33,14 @@
   抽出ライフサイクル（none→draft→verified、verified は明示操作のみ。OCR 自体は後続）、
   壊れた参照検出（`report broken-refs` + doctor の provenance_intact）、`import document` /
   `document attach-text|list`。テスト 15 件追加で **602 passed**。実機 store は v3 へ migrate 済み
-  残: 実データ検証（実 iPhone export）→ H5 レポート配信（**凍結明け** + allowlist 第4カテゴリ + H5-P1）
+- 2026-07-13: **H5 レポート配信実装（オーナー指示 2026-07-12 により前倒し。凍結が保護する
+  cairn.db 評価には非接触 — 90 Auto は索引対象外で還流なし）**。allowlist 第4カテゴリ
+  `health`（90 Auto/Health、上書き可）+ AGENTS 不変条件2改訂 + パス検証テスト拡張。
+  4レポート（current-status / timeline / lab-trends / data-quality）を `cairn health deliver`
+  で手動配信（launchd 自動化はしない）。H5-P1 決定記録（既定除外のまま、opt-in なし。
+  Syncthing 索引に載らないことを実機確認）。テスト 10 件追加で **613 passed**。
+  events.yml テンプレートを保護 home に設置（ドライラン検証済み）
+  残: 実 iPhone export の月次運用 → H6 AI 解釈（AI Drafts 項目含む）
 
 ## 採用基準
 

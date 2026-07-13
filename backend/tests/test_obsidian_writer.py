@@ -1,6 +1,6 @@
 """deliver/obsidian_writer.py — the vault write allowlist (invariant 2).
 
-Security-critical: these tests ENFORCE that writes land only in the three
+Security-critical: these tests ENFORCE that writes land only in the four
 allowlisted destinations and that traversal / absolute-path / symlink-escape
 attempts are refused. A regression here is an invariant-2 violation.
 """
@@ -38,6 +38,34 @@ def test_write_auto_overwrites(vault):
     # overwrite allowed for 90 Auto
     p2 = w.write("auto", "cairn-recent.md", "本文2")
     assert p2.read_text(encoding="utf-8") == "本文2"
+
+
+def test_write_health_overwrites_and_stays_inside_90auto(vault):
+    """H5 (ADR-0005): the 4th category writes only under 90 Auto/Health,
+    overwrite allowed (reports are regenerated), same validation as others."""
+    root, w = vault
+    p = w.write("health", "current-status.md", "v1")
+    assert p == eb(root) / "90 Auto" / "Health" / "current-status.md"
+    p2 = w.write("health", "current-status.md", "v2")
+    assert p2.read_text(encoding="utf-8") == "v2"
+    assert p.resolve().is_relative_to((eb(root) / "90 Auto").resolve())
+
+
+def test_health_category_rejects_traversal_and_dotfiles(vault):
+    root, w = vault
+    for bad in ("../escape.md", "..", ".hidden.md", "sub/dir.md"):
+        with pytest.raises(w.ObsidianWriteError):
+            w.write("health", bad, "x")
+
+
+def test_health_symlinked_base_escaping_vault_rejected(vault, tmp_path):
+    root, w = vault
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (eb(root) / "90 Auto" / "Health").symlink_to(outside)
+    with pytest.raises(w.ObsidianWriteError):
+        w.write("health", "current-status.md", "x")
+    assert list(outside.iterdir()) == []
 
 
 def test_write_weekly_new_only(vault):
