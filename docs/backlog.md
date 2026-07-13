@@ -5,6 +5,8 @@
 **今なにをすべきかの正典は DESIGN.md §7（マイルストーン）**。本ファイルはマイルストーン外の
 細かい作業候補の置き場。現況の詳細な棚卸し・残課題・拡張設計は
 [`status-2026-07-06.md`](status-2026-07-06.md) を参照（本ファイルより詳しい）。
+2026 下半期の実行計画（凍結解除ゲート → H5〜H8 → H10/H11 提案の順序・完了条件）は
+[`plan-2026h2.md`](plan-2026h2.md)、長期の思弁的方向は [`HORIZONS.md`](HORIZONS.md)。
 
 ## 直近の到達点（2026-07-06 時点）
 
@@ -51,7 +53,7 @@
 
 | # | 候補 | 規模 | 依存 | 価値 |
 |---|---|---|---|---|
-| A0 | **データ穴埋め**: Gemini Takeout 取り込み + claude/chatgpt export 更新 + `cairn index rebuild` 1 回 | XS(人間) | — | **最優先**。S5 の材料が揃う（status doc R1） |
+| A0 | ✅ 完了（2026-07-12）: Gemini Takeout +6 会話、Claude export +14/更新177、ChatGPT は 6/26 版取り込み済みを確認（1,226 全 skip）。Obsidian 3 ノートは launchd 同期済み。`index rebuild` 実行。S5 の 4 系統すべてに実データあり | XS | — | 済 |
 | A1 | `admin backup --with-blobs` — `data/attachments/` を colocate | XS | — | blob store 後は backup が不完全 |
 | A2 | `import_runs.failed` の正しい計上 — parse 例外が warning 扱いで failed=0 | XS | — | メトリクス精度 |
 | A3 | per-parser PARSER_VERSION — 現状 suite 単位 | S | — | 部分再 ingest が可能になる |
