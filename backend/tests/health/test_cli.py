@@ -137,3 +137,34 @@ def test_document_flow_and_broken_refs(health_home):
     assert doc["ok"] is True
     assert any(c["name"] == "provenance_intact" and c["ok"]
                for c in doc["checks"])
+
+
+def test_backup_restore_purge_cli_flow(health_home, catalog_dir,
+                                       labs_csv_path, tmp_path, monkeypatch):
+    from app.health.importers import labs_csv
+
+    _json(runner.invoke(app, ["health", "init"]))
+    labs_csv.run(labs_csv_path, catalog_dir=catalog_dir)
+
+    dest = tmp_path / "backups-out"
+    made = _json(runner.invoke(app, ["health", "backup", "create",
+                                     "--dest", str(dest)]))
+    assert made["table_counts"]["observations"] == 10
+
+    listed = _json(runner.invoke(app, ["health", "backup", "list",
+                                       "--dest", str(dest)]))
+    assert len(listed["backups"]) == 1
+    archive = listed["backups"][0]["archive"]
+
+    verify = _json(runner.invoke(app, ["health", "backup", "verify", archive]))
+    assert verify["ok"] is True
+
+    into = tmp_path / "restored"
+    res = _json(runner.invoke(app, ["health", "backup", "restore", archive,
+                                    "--into", str(into)]))
+    assert res["ok"] is True
+
+    # purge without the flag refuses (exit 1) and enumerates.
+    refused = runner.invoke(app, ["health", "purge"])
+    assert refused.exit_code == 1
+    assert "will_delete" in refused.output

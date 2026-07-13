@@ -198,13 +198,27 @@ only human-promoted notes under the existing Obsidian index allowlist enter
 
 ## H8 — Backup, restore, and deletion
 
-- [ ] Raw sources, database, catalog versions, and report metadata can be snapshotted consistently.
-- [ ] Restore into an empty test environment reproduces record counts and hashes.
-- [ ] Derived data can be deleted and regenerated.
-- [ ] Backup failure does not destroy a successful import.
-- [ ] Retention and encrypted destination requirements are documented.
-- [ ] Destructive deletion lists raw, store, derived, reports, quarantine, and backups.
-- [ ] Destructive deletion requires explicit confirmation.
+- [x] Raw sources, database, catalog versions, and report metadata can be snapshotted consistently.
+- [x] Restore into an empty test environment reproduces record counts and hashes.
+- [x] Derived data can be deleted and regenerated.
+- [x] Backup failure does not destroy a successful import.
+- [x] Retention and encrypted destination requirements are documented.
+- [x] Destructive deletion lists raw, store, derived, reports, quarantine, and backups.
+- [x] Destructive deletion requires explicit confirmation.
+
+H8 verified 2026-07-13 with synthetic data (`tests/health/test_ops.py`,
+CLI flow in `test_cli.py`; backend total 664 passed). `app/health/ops.py`:
+`backup` writes a single `.tar.gz` (store + raw + reports + derived +
+quarantine + `MANIFEST.json` with schema/catalog/mapping versions, table
+counts, store + per-raw sha256) via a temp file + atomic rename, read-only
+w.r.t. the live store, and refuses a worktree destination; `restore` extracts
+into an empty home and verifies counts + store hash against the manifest;
+`verify_backup` probes an archive's store hash; `rotate_backups` keeps the
+newest N (backup files only). `delete_derived` removes only regenerable
+derived/reports; `purge` enumerates all six dirs and requires an exact
+confirmation token (CLI `--yes-delete-everything`). Retention + encrypted-
+destination requirements are in `PRIVACY.md` §10. launchd automation of
+backups and any real destructive delete stay manual (AGENTS.md invariant 8).
 
 ## Local real-data verification
 

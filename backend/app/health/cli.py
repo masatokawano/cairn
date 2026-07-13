@@ -235,6 +235,110 @@ def status() -> None:
     _echo(info)
 
 
+backup_app = typer.Typer(no_args_is_help=True,
+                         help="Backup / restore / retention (H8).")
+health_app.add_typer(backup_app, name="backup")
+
+
+@backup_app.command("create")
+def backup_create(
+    dest: Path | None = typer.Option(
+        None, "--dest", help="Destination dir (default: <home>/backups). Must "
+        "be outside the git worktree; copy off-machine to encrypted storage."),
+) -> None:
+    """Write a consistent .tar.gz snapshot (store + raw + reports + manifest)."""
+    from . import ops
+
+    try:
+        _echo(ops.backup(dest_dir=dest))
+    except ops.OpsError as exc:
+        typer.echo(f"backup failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
+@backup_app.command("list")
+def backup_list(
+    dest: Path | None = typer.Option(None, "--dest"),
+) -> None:
+    """List backup archives."""
+    from . import ops
+
+    _echo({"backups": ops.list_backups(dest)})
+
+
+@backup_app.command("verify")
+def backup_verify(archive: Path) -> None:
+    """Check an archive's store hash against its manifest."""
+    from . import ops
+
+    out = ops.verify_backup(archive)
+    _echo(out)
+    if not out["ok"]:
+        raise typer.Exit(code=1)
+
+
+@backup_app.command("restore")
+def backup_restore(
+    archive: Path,
+    into: Path = typer.Option(..., "--into",
+                              help="Empty target home directory."),
+) -> None:
+    """Restore an archive into an empty home and verify counts + hashes."""
+    from . import ops
+
+    try:
+        out = ops.restore(archive, into)
+    except ops.OpsError as exc:
+        typer.echo(f"restore failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    _echo(out)
+    if not out["ok"]:
+        raise typer.Exit(code=1)
+
+
+@backup_app.command("rotate")
+def backup_rotate(
+    keep: int = typer.Option(7, "--keep", help="Newest N archives to keep."),
+    dest: Path | None = typer.Option(None, "--dest"),
+) -> None:
+    """Delete backup archives older than the newest --keep (backups only)."""
+    from . import ops
+
+    try:
+        _echo(ops.rotate_backups(dest, keep=keep))
+    except ops.OpsError as exc:
+        typer.echo(f"rotate failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
+@health_app.command("delete-derived")
+def delete_derived() -> None:
+    """Delete regenerable derived data + reports (sources/store untouched)."""
+    from . import ops
+
+    _echo(ops.delete_derived())
+
+
+@health_app.command("purge")
+def purge(
+    confirm: bool = typer.Option(
+        False, "--yes-delete-everything",
+        help="Required. Irreversibly deletes the ENTIRE health data home."),
+) -> None:
+    """DESTRUCTIVE: delete the entire health data home. Lists everything first
+    and requires the explicit flag (AGENTS.md invariant 8)."""
+    from . import config, ops
+
+    home = config.resolve_home()
+    plan = ops.purge_plan(home)
+    _echo({"will_delete": plan})
+    if not confirm:
+        typer.echo("refused: re-run with --yes-delete-everything to proceed",
+                   err=True)
+        raise typer.Exit(code=1)
+    _echo(ops.purge(home, confirm=str(home)))
+
+
 document_app = typer.Typer(no_args_is_help=True,
                            help="Manage registered medical documents (H4).")
 health_app.add_typer(document_app, name="document")
