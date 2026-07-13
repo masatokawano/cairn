@@ -121,3 +121,19 @@ Cairnリポジトリにはコード、スキーマ、文書、合成テストデ
 - FHIR完全準拠をMVPの条件にすること
 - 医療機関向け電子カルテを作ること
 - Health実装前に汎用Validation schemaを作り込むこと
+
+## 7. Health MCP（H7）
+
+Health MCP は通常の `cairn` MCP と分離した read-only STDIO サーバーで、既定無効。
+登録だけでは起動せず、利用時に `CAIRN_HEALTH_MCP=1` を明示する。
+
+```bash
+claude mcp add cairn-health -s user -e CAIRN_HEALTH_MCP=1 -- \
+  /absolute/path/to/backend/.venv/bin/python \
+  /absolute/path/to/backend/run_health_mcp.py
+```
+
+全データ取得ツールは対象 metric を必須とし、既定期間366日、最大期間3650日、
+最大8 metric / 300 observation。event と accepted interpretation は context pack の
+別 opt-in で、含めた observation/event/source/snapshot の ID と hash を返す。
+free text は長さ制限付き fence、解釈は `synthesized` に分離される。

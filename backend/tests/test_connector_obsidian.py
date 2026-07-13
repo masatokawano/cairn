@@ -63,14 +63,20 @@ def test_indexes_target_dirs_and_skips_auto_reviews(db):
     write_note("External Brain/50 Decisions/D9.md", "FDA を廃止する決定")
     # excluded: generated output must never flow back into the index
     write_note("External Brain/90 Auto/cairn-recent.md", "自動生成一覧")
+    write_note("External Brain/90 Auto/Health/current-status.md",
+               "未承認の自動健康レポート")
+    # Human-approved summaries enter Cairn only through a normal note path.
+    write_note("External Brain/10 Themes/approved-health-summary.md",
+               "人間が確認した健康サマリー")
     write_note("External Brain/40 Reviews/Weekly/2026-W27.md", "週次レビュー")
     write_note("External Brain/30 Sources/引用元.md", "対象外ディレクトリ")
 
     stats = sync()
-    assert stats["inserted"] == 4
+    assert stats["inserted"] == 5
     items = note_items(db)
     assert set(items) == {
         "External Brain/10 Themes/外部脳.md",
+        "External Brain/10 Themes/approved-health-summary.md",
         "External Brain/20 Projects/cairn.md",
         "External Brain/00 Inbox/Ideas/着想.md",
         "External Brain/50 Decisions/D9.md",

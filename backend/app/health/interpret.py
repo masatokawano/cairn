@@ -90,10 +90,12 @@ def check_safety(text: str) -> list[str]:
 
 # --- snapshots ---------------------------------------------------------------
 
-def create_snapshot(conn, *, metrics: list[str], since: str | None = None,
-                    until: str | None = None, max_rows: int = MAX_EVIDENCE_ROWS
-                    ) -> dict:
-    """Freeze the exact rows an analysis will look at (DATA_MODEL §2.10)."""
+def compute_snapshot(conn, *, metrics: list[str], since: str | None = None,
+                     until: str | None = None, max_rows: int = MAX_EVIDENCE_ROWS
+                     ) -> dict:
+    """Select the exact rows an analysis will look at and describe them —
+    WITHOUT persisting. Read-only; the deterministic id/hash let a read-only
+    consumer (H7 MCP) identify the snapshot without writing to the store."""
     if not metrics or len(metrics) > MAX_METRICS:
         raise InterpretError(f"1..{MAX_METRICS} metrics required")
     placeholders = ",".join("?" * len(metrics))
@@ -113,23 +115,43 @@ def create_snapshot(conn, *, metrics: list[str], since: str | None = None,
         " ORDER BY observed_date DESC, metric_id, fingerprint LIMIT ?",
         params,
     ).fetchall()
-
-    snapshot_id = uuid.uuid4().hex
     result_hash = hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
     catalog_version = conn.execute(
         "SELECT catalog_version FROM metric_catalog LIMIT 1").fetchone()
+    # Deterministic id: same query + same rows => same snapshot identity.
+    snapshot_id = hashlib.sha256(
+        (result_hash + json.dumps({"metrics": sorted(metrics), "since": since,
+                                   "until": until}, ensure_ascii=False)
+         ).encode("utf-8")).hexdigest()[:32]
+    return {"id": snapshot_id, "rows": rows, "result_hash": result_hash,
+            "row_count": len(rows),
+            "max_observed_at": max((r[2] for r in rows), default=None),
+            "catalog_version": catalog_version[0] if catalog_version else None,
+            "query_spec": {"metrics": metrics, "since": since, "until": until,
+                           "max_rows": max_rows}}
+
+
+def create_snapshot(conn, *, metrics: list[str], since: str | None = None,
+                    until: str | None = None, max_rows: int = MAX_EVIDENCE_ROWS
+                    ) -> dict:
+    """Freeze and PERSIST a snapshot (DATA_MODEL §2.10) — for the write path
+    (ai_draft). Read consumers use compute_snapshot instead."""
+    snap = compute_snapshot(conn, metrics=metrics, since=since, until=until,
+                            max_rows=max_rows)
+    # Persisted H6 snapshots remain per-analysis records.  The read-only H7
+    # path uses compute_snapshot's deterministic identity, but an AI draft is
+    # a new analysis event even when its selected rows happen to be identical.
+    snapshot_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO data_snapshots (id, created_at, query_spec_json,"
         " result_hash, row_count, max_observed_at, catalog_version)"
         " VALUES (?,?,?,?,?,?,?)",
         [snapshot_id, datetime.now(timezone.utc),
-         json.dumps({"metrics": metrics, "since": since, "until": until,
-                     "max_rows": max_rows}, ensure_ascii=False),
-         result_hash, len(rows), max((r[2] for r in rows), default=None),
-         catalog_version[0] if catalog_version else None],
+         json.dumps(snap["query_spec"], ensure_ascii=False),
+         snap["result_hash"], snap["row_count"], snap["max_observed_at"],
+         snap["catalog_version"]],
     )
-    return {"id": snapshot_id, "rows": rows, "result_hash": result_hash,
-            "row_count": len(rows)}
+    return {**snap, "id": snapshot_id}
 
 
 # --- write / lifecycle --------------------------------------------------------

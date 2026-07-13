@@ -49,7 +49,12 @@
   フェンスして指示と構造分離（PRIVACY §7）。accepted は人間 CLI + evidence 必須、
   append-only supersede。供養録（rejected/superseded 一覧）。AI Drafts 配信は
   opt-in（--deliver、同期される旨を警告）。テスト 12 件で **627 passed**。実機 store v4
-  残: 実運用（実データで解釈生成）→ H7 MCP → H8 運用（いずれも凍結明け相当・要レビュー）
+- 2026-07-13: **H7 read-only Health MCP 実装**。通常 Cairn MCP と分離し既定無効、
+  metric 必須 + 行/期間/free-text 上限、event/interpretation は別 opt-in。context pack は
+  observation selection/projection・event の hash と source/snapshot provenance を返す。
+  合成 store の実 STDIO initialize/list/call と独立 security review を完了。health 133 / backend
+  全体 651 tests passed（既知 warning 1）。
+  残: 実運用（実データで解釈生成）→ H8 運用（要レビュー）
 
 ## 採用基準
 

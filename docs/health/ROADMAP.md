@@ -215,19 +215,21 @@ Question
 
 ## H7 — Cairn and MCP integration
 
+**Status: completed 2026-07-13 (independent security review completed).**
+
 ### Goal
 
 Make health context available to AI sessions under explicit, minimum-disclosure controls.
 
-### Candidate tools
+### Implemented tools
 
-- `health_get_current_status`
-- `health_get_timeline`
+- `health_current_status`
 - `health_query_observations`
-- `health_compare_periods`
-- `health_get_event_response`
-- `health_build_visit_brief`
-- `health_get_interpretation_history`
+- `health_compare_event`
+- `health_data_quality`
+- `health_interpretation_history`
+- `health_get_interpretation`
+- `health_build_context_pack`
 
 ### Constraints
 
@@ -236,6 +238,13 @@ Make health context available to AI sessions under explicit, minimum-disclosure 
 - aggregates preferred
 - high-frequency samples not inserted one-by-one into Cairn search indexes
 - original and generated content structurally separated
+
+Implemented as a separate `cairn-health` STDIO server. It refuses startup
+without explicit opt-in, opens the independent DuckDB store read-only, requires
+metric selection, and keeps events/interpretations behind separate opt-ins.
+High-frequency observations remain outside `cairn.db`; auto reports remain
+excluded from Obsidian indexing, while human-promoted summaries use the normal
+note path.
 
 ## H8 — Reliability and long-term operation
 

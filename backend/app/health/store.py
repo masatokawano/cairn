@@ -73,6 +73,42 @@ def connect(home: Path | None = None, *, create: bool = False):
     return conn
 
 
+def connect_readonly(home: Path | None = None):
+    """Open the store READ-ONLY, without migrating.
+
+    For read-only consumers (the health MCP server, H7): a read-only handle
+    coexists with other read-only readers and never writes, so it can run
+    beside the CLI's occasional access without fighting over the single
+    writer. It refuses to migrate — if the store is behind, the user must run
+    a ``cairn health`` command first (writes belong to that path, not here).
+    """
+    import duckdb
+
+    home = home or config.resolve_home()
+    path = config.store_path(home)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"health store not initialized (run `cairn health init`): {path}")
+    conn = duckdb.connect(str(path), read_only=True)
+    try:
+        row = conn.execute(
+            "SELECT value FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        current = int(row[0]) if row else 0
+    except Exception:
+        conn.close()
+        raise RuntimeError(
+            "health store schema is unavailable; run `cairn health doctor`"
+            " locally") from None
+    if current != schema.SCHEMA_VERSION:
+        conn.close()
+        raise RuntimeError(
+            f"health store is schema v{current}, code expects "
+            f"v{schema.SCHEMA_VERSION}; run any `cairn health` command to "
+            "migrate before read-only access")
+    return conn
+
+
 def counts(conn) -> dict:
     """Row counts for status/doctor output — counts and versions only, no
     metric names, dates or values (PRIVACY.md §5)."""

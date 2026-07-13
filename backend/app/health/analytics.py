@@ -121,14 +121,16 @@ def current_events(conn) -> list[dict]:
     rows = conn.execute(
         "SELECT e.id, e.kind, e.label, e.start_raw, e.start_earliest,"
         "       e.start_latest, e.end_raw, e.end_latest, e.time_precision,"
-        "       e.status, e.dose_value, e.dose_unit, e.confidence"
+        "       e.status, e.dose_value, e.dose_unit, e.confidence,"
+        "       e.source_file_id"
         " FROM events e"
         " WHERE NOT EXISTS (SELECT 1 FROM events s WHERE s.supersedes_id = e.id)"
         " ORDER BY e.start_earliest NULLS LAST, e.id"
     ).fetchall()
     keys = ("id", "kind", "label", "start_raw", "start_earliest",
             "start_latest", "end_raw", "end_latest", "time_precision",
-            "status", "dose_value", "dose_unit", "confidence")
+            "status", "dose_value", "dose_unit", "confidence",
+            "source_file_id")
     return [dict(zip(keys, r)) for r in rows]
 
 
@@ -155,7 +157,8 @@ def overlay(conn) -> list[dict]:
     return out
 
 
-def event_response(conn, event_id: str, *, window_days: int = 90) -> dict:
+def event_response(conn, event_id: str, *, window_days: int = 90,
+                   metrics: list[str] | None = None) -> dict:
     """Factual before/after summary around one event's start window."""
     event = next((e for e in current_events(conn) if e["id"] == event_id), None)
     if event is None:
@@ -167,12 +170,18 @@ def event_response(conn, event_id: str, *, window_days: int = 90) -> dict:
 
     lo = event["start_earliest"] - timedelta(days=window_days)
     hi = event["start_latest"] + timedelta(days=window_days)
+    metric_sql = ""
+    params: list = [lo, hi]
+    if metrics:
+        metric_sql = f" AND metric_id IN ({','.join('?' * len(metrics))})"
+        params.extend(metrics)
     rows = conn.execute(
         "SELECT metric_id, observed_date, value_num, original_value, unit,"
         "       quality_status FROM observations"
         " WHERE observed_date BETWEEN ? AND ?"
+        + metric_sql +
         " ORDER BY metric_id, observed_date, fingerprint",
-        [lo, hi],
+        params,
     ).fetchall()
 
     metrics: dict[str, dict] = {}
@@ -203,3 +212,53 @@ def event_response(conn, event_id: str, *, window_days: int = 90) -> dict:
                 "mean": round(sum(values) / len(values), 4) if values else None,
             }
     return {"event": event, "window_days": window_days, "metrics": metrics}
+
+
+def event_response_summary(conn, event_id: str, *, metrics: list[str],
+                           window_days: int = 90) -> dict:
+    """SQL-aggregated event comparison for bounded disclosure surfaces.
+
+    Unlike ``event_response`` (used by factual reports that need points), this
+    never materializes high-frequency raw rows in Python.
+    """
+    event = next((e for e in current_events(conn) if e["id"] == event_id), None)
+    if event is None:
+        raise KeyError(f"unknown or superseded event: {event_id!r}")
+    if not event["start_earliest"]:
+        return {"event": event, "window_days": window_days,
+                "note": "event start is unknown — no window comparison possible",
+                "metrics": {}}
+
+    lo = event["start_earliest"] - timedelta(days=window_days)
+    hi = event["start_latest"] + timedelta(days=window_days)
+    placeholders = ",".join("?" * len(metrics))
+    rows = conn.execute(
+        "SELECT metric_id, max(unit),"
+        " count(value_num) FILTER (WHERE observed_date < ?),"
+        " min(value_num) FILTER (WHERE observed_date < ?),"
+        " max(value_num) FILTER (WHERE observed_date < ?),"
+        " avg(value_num) FILTER (WHERE observed_date < ?),"
+        " count(value_num) FILTER (WHERE observed_date > ?),"
+        " min(value_num) FILTER (WHERE observed_date > ?),"
+        " max(value_num) FILTER (WHERE observed_date > ?),"
+        " avg(value_num) FILTER (WHERE observed_date > ?),"
+        " count(value_num) FILTER (WHERE observed_date BETWEEN ? AND ?),"
+        " count(*) FILTER (WHERE value_num IS NULL)"
+        " FROM observations WHERE observed_date BETWEEN ? AND ?"
+        f" AND metric_id IN ({placeholders}) GROUP BY metric_id"
+        " ORDER BY metric_id",
+        [event["start_earliest"]] * 4 + [event["start_latest"]] * 4
+        + [event["start_earliest"], event["start_latest"], lo, hi, *metrics],
+    ).fetchall()
+    out = {}
+    for row in rows:
+        out[row[0]] = {
+            "unit": row[1],
+            "before_summary": {"n": row[2], "min": row[3], "max": row[4],
+                               "mean": round(row[5], 4) if row[5] is not None else None},
+            "after_summary": {"n": row[6], "min": row[7], "max": row[8],
+                              "mean": round(row[9], 4) if row[9] is not None else None},
+            "in_start_window_count": row[10],
+            "non_numeric": row[11],
+        }
+    return {"event": event, "window_days": window_days, "metrics": out}

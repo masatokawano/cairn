@@ -175,13 +175,26 @@ existing structured-output LLMProvider contract.
 
 ## H7 — Cairn integration
 
-- [ ] High-frequency observations are not inserted one-by-one into Cairn `items` or `chunks`.
-- [ ] Cairn indexes report metadata and approved human-readable summaries only.
-- [ ] Health-domain retrieval can be disabled independently.
-- [ ] MCP tools are opt-in and have conservative default limits.
-- [ ] A context pack identifies all included data snapshots and source categories.
-- [ ] Failure of the health store does not corrupt `cairn.db`.
-- [ ] Failure of Cairn search does not corrupt the health store.
+- [x] High-frequency observations are not inserted one-by-one into Cairn `items` or `chunks`.
+- [x] Cairn indexes report metadata and approved human-readable summaries only.
+- [x] Health-domain retrieval can be disabled independently.
+- [x] MCP tools are opt-in and have conservative default limits.
+- [x] A context pack identifies all included data snapshots and source categories.
+- [x] Failure of the health store does not corrupt `cairn.db`.
+- [x] Failure of Cairn search does not corrupt the health store.
+
+H7 verified 2026-07-13 with synthetic data. `cairn-health` is a separate
+read-only STDIO process and refuses startup unless `CAIRN_HEALTH_MCP=1`.
+Tool inputs require explicit metrics (maximum 8); observation rows, periods,
+events, interpretations, evidence, and free-text fields are independently
+bounded. Context packs expose content-addressed observation selection and
+returned projection hashes, an event snapshot hash, source IDs/categories,
+and interpretation snapshot IDs. Tests cover actual MCP initialize/list/call,
+read-only write rejection, error redaction, and both database-failure isolation
+directions. Auto-generated `90 Auto/Health` reports remain outside the index;
+only human-promoted notes under the existing Obsidian index allowlist enter
+`cairn.db`. Final regression: health 133 passed; backend total 651 passed
+(1 pre-existing Starlette deprecation warning).
 
 ## H8 — Backup, restore, and deletion
 
