@@ -188,6 +188,16 @@ Policy:
   excluded.
 - H5 delivery must not begin until this decision (H5-P1) is recorded as made.
 
+**Decision H5-P1 — made 2026-07-13 (repository owner, front-loading H5 by
+owner instruction):** the default stands. No report type is opted in to
+replication; all four delivered reports (`current-status` / `timeline` /
+`lab-trends` / `data-quality`) exist only on the Cairn Mac. `90 Auto/Health`
+is in the vault's `.stignore` (verified). Remotely Save is not yet configured
+on any device; when it is, its skip list must include this folder before
+first sync (tracked as the standing warning in `cairn health doctor`).
+Opt-in for `next-visit-brief.md` will be reconsidered when that report type
+lands (P6/H10).
+
 ## 11. Consequential-action boundary
 
 The system must not automatically:

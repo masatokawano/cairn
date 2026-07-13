@@ -128,17 +128,24 @@ broken-reference detection (`cairn health report broken-refs`, also a
 
 ## H5 — Reports and longitudinal comparison
 
-- [ ] A current-status report shows latest value, date, source, and data-quality caveats.
-- [ ] A timeline report combines observations and explicit events.
-- [ ] Baseline and follow-up periods are defined in the output.
-- [ ] Missingness and observation frequency are reported.
-- [ ] A single value is not described as a persistent trend by the template.
-- [ ] Reports distinguish source facts, derived calculations, and interpretations.
-- [ ] The same snapshot and template version produce deterministic factual sections.
-- [ ] Auto-generated reports stay within `90 Auto/Health`.
-- [ ] The new `health` writer category (`90 Auto/Health`, overwrite allowed) is enforced by the same allowlist and path-validation tests as the existing categories, and `AGENTS.md` invariant 2 is revised in the same change.
-- [ ] The vault-replication decision (H5-P1 in `PRIVACY.md` §10) is made and applied before the first real-data report is delivered; until then `90 Auto/Health` is excluded from every vault sync mechanism.
-- [ ] Interpretive drafts use `00 Inbox/AI Drafts` and are created as new files only.
+- [x] A current-status report shows latest value, date, source, and data-quality caveats.
+- [x] A timeline report combines observations and explicit events.
+- [x] Baseline and follow-up periods are defined in the output. (event-response, H2)
+- [x] Missingness and observation frequency are reported. (data-quality / lab_summary)
+- [x] A single value is not described as a persistent trend by the template. (single measurements structurally separated in lab-trends)
+- [x] Reports distinguish source facts, derived calculations, and interpretations. (sections labelled source facts / derived; interpretations absent until H6)
+- [x] The same snapshot and template version produce deterministic factual sections.
+- [x] Auto-generated reports stay within `90 Auto/Health`.
+- [x] The new `health` writer category (`90 Auto/Health`, overwrite allowed) is enforced by the same allowlist and path-validation tests as the existing categories, and `AGENTS.md` invariant 2 is revised in the same change.
+- [x] The vault-replication decision (H5-P1 in `PRIVACY.md` §10) is made and applied before the first real-data report is delivered; until then `90 Auto/Health` is excluded from every vault sync mechanism.
+- [ ] Interpretive drafts use `00 Inbox/AI Drafts` and are created as new files only. （H6 で実装 — 配信機構の "draft" カテゴリは既存）
+
+H5 verified 2026-07-13 (front-loaded before the M6③ freeze lift by owner
+instruction 2026-07-12; the freeze protects the cairn.db evaluation, which
+this does not touch — 90 Auto is outside the indexed set, so no
+self-ingestion loop). `tests/health/test_vault_reports.py` +
+`test_obsidian_writer.py` health cases; suite total 613 passed. Delivery is
+manual (`cairn health deliver`) — no automatic vault writes from launchd yet.
 
 ## H6 — AI interpretation and validation trail
 

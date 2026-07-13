@@ -296,6 +296,21 @@ def report_data_quality() -> None:
         conn.close()
 
 
+@health_app.command("deliver")
+def deliver() -> None:
+    """Write the four factual reports into the vault's 90 Auto/Health (H5).
+
+    The folder is excluded from vault sync by default (PRIVACY.md H5-P1) —
+    reports exist only on this Mac unless a type is explicitly opted in."""
+    from .reports import vault_reports
+
+    try:
+        _echo(vault_reports.deliver())
+    except Exception as exc:
+        typer.echo(f"deliver failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
 @report_app.command("broken-refs")
 def report_broken_refs() -> None:
     """List rows whose source snapshot or extracted text is missing on disk."""

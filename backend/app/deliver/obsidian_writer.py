@@ -1,7 +1,7 @@
 """Obsidian vault writer — the ONLY path that writes into the vault.
 
 Invariant 2 (AGENTS.md / DESIGN.md §5.5): writes are restricted to exactly
-three destinations, enforced here by an allowlist plus path validation. No
+four destinations, enforced here by an allowlist plus path validation. No
 other module may write to the vault, and this set must never be widened
 without a Decision Record change.
 
@@ -10,6 +10,7 @@ without a Decision Record change.
     "auto"     90 Auto/                     overwrite allowed
     "weekly"   40 Reviews/Weekly/           new file only
     "draft"    00 Inbox/AI Drafts/          new file only
+    "health"   90 Auto/Health/              overwrite allowed (H5, ADR-0005)
 
 Threat model: the destination directories are constants and the vault root
 comes from trusted config, but filenames (and content) can be derived from
@@ -43,10 +44,16 @@ import tempfile
 from pathlib import Path
 
 # category -> (subdirectory under the External Brain folder, overwrite_allowed)
+# "health" (H5, ADR-0005): inside the existing 90 Auto tree — the writable
+# area does not grow, only the entry count (health/DESIGN.md H-D7). Health
+# reports carry real measurements; the folder is excluded from every vault
+# sync by default (PRIVACY.md §10 H5-P1) and is NOT indexed by the Obsidian
+# connector (90 Auto is outside the indexed set — no self-ingestion loop).
 ALLOWLIST: dict[str, tuple[str, bool]] = {
     "auto": ("90 Auto", True),
     "weekly": ("40 Reviews/Weekly", False),
     "draft": ("00 Inbox/AI Drafts", False),
+    "health": ("90 Auto/Health", True),
 }
 
 
