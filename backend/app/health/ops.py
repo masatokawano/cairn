@@ -135,7 +135,17 @@ def backup(home: Path | None = None, dest_dir: Path | None = None) -> dict:
             import io
             tar.addfile(info, io.BytesIO(man_bytes))
         os.chmod(tmp_path, config.FILE_MODE)
+        # Durable rename: flush the archive to disk, then rename, then flush
+        # the directory entry — so a crash cannot leave a good-looking but
+        # partial archive.
+        with open(tmp_path, "rb") as fh:
+            os.fsync(fh.fileno())
         tmp_path.replace(final)
+        dir_fd = os.open(str(dest_dir), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -156,10 +166,18 @@ def read_manifest(archive: Path) -> dict:
 
 
 def restore(archive: Path | None, into: Path, *, verify: bool = True) -> dict:
-    """Extract an archive into an EMPTY home and (default) verify counts and
-    the store hash against the manifest."""
+    """Extract an archive into an EMPTY home and (default) verify EVERY
+    manifest hash (store + each raw file), the versions, and table counts.
+
+    The manifest lives inside the archive, so this proves the restore is
+    complete and uncorrupted — it is an integrity checksum, not a signature,
+    and does not defend against a maliciously re-packed archive (make backups
+    yourself and store them on trusted media)."""
     archive = Path(archive)
     into = Path(into)
+    if _inside_worktree(into):
+        raise OpsError(f"refusing to restore health data inside the git "
+                       f"worktree: {into}")
     if into.exists() and any(into.iterdir()):
         raise OpsError(f"restore target must be empty: {into}")
     into.mkdir(parents=True, exist_ok=True)
@@ -179,35 +197,56 @@ def restore(archive: Path | None, into: Path, *, verify: bool = True) -> dict:
     result = {"restored_to": str(into), "manifest_created_at":
               manifest["created_at"], "ok": True, "mismatches": []}
     if verify:
-        mism = []
-        if sf.exists():
-            got = _sha256_file(sf)
-            if got != manifest["store_sha256"]:
-                mism.append("store_sha256")
-            counts = _table_counts(into)
-            for t, n in manifest["table_counts"].items():
-                if counts.get(t) != n:
-                    mism.append(f"count:{t}")
-        else:
-            mism.append("store_missing")
-        result["ok"] = not mism
-        result["mismatches"] = mism
+        result["mismatches"] = _verify_against_manifest(into, manifest)
+        result["ok"] = not result["mismatches"]
     logger.info("health restore ok=%s into=%s", result["ok"], into.name)
     return result
 
 
+def _verify_against_manifest(home: Path, manifest: dict) -> list[str]:
+    """Every store/raw hash, version, and table count must match. Returns the
+    list of mismatches (empty = fully verified)."""
+    mism: list[str] = []
+    sf = config.store_path(home)
+    if not sf.exists():
+        return ["store_missing"]
+    if _sha256_file(sf) != manifest["store_sha256"]:
+        mism.append("store_sha256")
+    for rel, want in manifest.get("raw_sha256", {}).items():
+        p = home / rel
+        if not p.exists():
+            mism.append(f"raw_missing:{rel}")
+        elif _sha256_file(p) != want:
+            mism.append(f"raw_sha256:{rel}")
+    if _versions(home) != manifest["versions"]:
+        mism.append("versions")
+    counts = _table_counts(home)
+    for t, n in manifest["table_counts"].items():
+        if counts.get(t) != n:
+            mism.append(f"count:{t}")
+    return mism
+
+
 def verify_backup(archive: Path) -> dict:
-    """Check an archive's manifest against its own contents (store hash),
-    without extracting into a home. A cheap integrity probe."""
+    """Extract to a throwaway dir and check the store hash AND every raw-file
+    hash against the manifest. Full integrity probe without touching a home."""
     archive = Path(archive)
     manifest = read_manifest(archive)
     with tempfile.TemporaryDirectory() as td:
+        target = Path(td)
         with tarfile.open(archive, "r:gz") as tar:
-            m = tar.getmember("store/health.duckdb")
-            tar.extract(m, td, filter="data")
-        got = _sha256_file(Path(td) / "store" / "health.duckdb")
-    ok = got == manifest["store_sha256"]
-    return {"ok": ok, "created_at": manifest["created_at"],
+            members = [m for m in tar.getmembers() if _safe_member(m, target)]
+            tar.extractall(target, members=members, filter="data")
+        mism = []
+        sf = target / "store" / "health.duckdb"
+        if not sf.exists() or _sha256_file(sf) != manifest["store_sha256"]:
+            mism.append("store_sha256")
+        for rel, want in manifest.get("raw_sha256", {}).items():
+            p = target / rel
+            if not p.exists() or _sha256_file(p) != want:
+                mism.append(f"raw:{rel}")
+    return {"ok": not mism, "mismatches": mism,
+            "created_at": manifest["created_at"],
             "table_counts": manifest["table_counts"]}
 
 
@@ -230,8 +269,13 @@ def rotate_backups(dest_dir: Path | None = None, *, keep: int = 7) -> dict:
         raise OpsError("keep must be >= 1")
     home = config.resolve_home()
     dest_dir = Path(dest_dir) if dest_dir else home / "backups"
-    archives = sorted(dest_dir.glob(f"{BACKUP_PREFIX}*.tar.gz"),
-                      key=lambda p: p.stat().st_mtime, reverse=True)
+    if dest_dir.is_symlink():
+        raise OpsError(f"refusing to rotate a symlinked backup dir: {dest_dir}")
+    # Only ever touch real files matching the backup name pattern.
+    archives = sorted(
+        (p for p in dest_dir.glob(f"{BACKUP_PREFIX}*.tar.gz")
+         if p.is_file() and not p.is_symlink()),
+        key=lambda p: p.stat().st_mtime, reverse=True)
     removed = []
     for p in archives[keep:]:
         p.unlink()
@@ -251,9 +295,16 @@ def delete_derived(home: Path | None = None) -> dict:
     removed = []
     for name in ("derived", "reports"):
         d = home / name
+        # A symlinked derived/ or reports/ could point at raw/ or outside the
+        # home; refuse to follow it rather than deleting the target's contents.
+        if d.is_symlink():
+            raise OpsError(f"refusing to delete through a symlinked {name}/")
         if d.exists():
             for p in d.iterdir():
-                if p.is_file():
+                if p.is_symlink():
+                    p.unlink()                       # remove the link, not target
+                    removed.append(str(p.relative_to(home)) + "@")
+                elif p.is_file():
                     p.unlink()
                     removed.append(str(p.relative_to(home)))
                 elif p.is_dir():
@@ -310,6 +361,17 @@ def _inside_worktree(path: Path) -> bool:
 
 
 def _safe_member(member: tarfile.TarInfo, dest: Path) -> bool:
-    # Reject path traversal / absolute paths in archive members.
-    target = (dest / member.name).resolve()
-    return str(target).startswith(str(dest.resolve())) and not member.issym()
+    # Reject absolute paths, traversal, and any link members (sym or hard).
+    # Proper path containment — not a string prefix (which would let
+    # /tmp/restore-evil pass for dest /tmp/restore).
+    if member.issym() or member.islnk():
+        return False
+    name = member.name
+    if name.startswith("/") or ".." in Path(name).parts:
+        return False
+    target = (dest / name).resolve()
+    try:
+        return target.is_relative_to(dest.resolve())
+    except AttributeError:  # py<3.9 (not expected here)
+        return str(target) == str(dest.resolve()) or \
+            str(target).startswith(str(dest.resolve()) + os.sep)

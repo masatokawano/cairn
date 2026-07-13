@@ -67,18 +67,86 @@ def test_restore_refuses_nonempty_target(populated, tmp_path):
         ops.restore(Path(out["archive"]), into)
 
 
-def test_verify_backup_detects_tamper(populated, tmp_path):
+def test_verify_backup_detects_store_tamper(populated, tmp_path):
+    """Re-pack the archive with a tampered store DB (manifest updated to keep
+    counts) — verify must still catch it via the store hash."""
+    import tarfile
+
     out = ops.backup(dest_dir=tmp_path / "b")
-    assert ops.verify_backup(Path(out["archive"]))["ok"] is True
-    # Corrupt the archive bytes → verify fails (or errors), never false-ok.
     archive = Path(out["archive"])
-    data = bytearray(archive.read_bytes())
-    data[-50] ^= 0xFF
-    archive.write_bytes(bytes(data))
-    try:
-        assert ops.verify_backup(archive)["ok"] is False
-    except Exception:
-        pass  # a gzip/tar error is an acceptable "not ok" too
+    assert ops.verify_backup(archive)["ok"] is True
+
+    work = tmp_path / "unpacked"
+    work.mkdir()
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(work, filter="data")
+    # Flip a byte in the store DB but leave the manifest's store_sha256 alone.
+    sf = work / "store" / "health.duckdb"
+    data = bytearray(sf.read_bytes())
+    data[100] ^= 0xFF
+    sf.write_bytes(bytes(data))
+    tampered = tmp_path / "b" / "health-backup-tampered.tar.gz"
+    with tarfile.open(tampered, "w:gz") as tar:
+        for p in sorted(work.rglob("*")):
+            if p.is_file():
+                tar.add(p, arcname=str(p.relative_to(work)))
+    assert ops.verify_backup(tampered)["ok"] is False
+
+
+def test_verify_backup_detects_raw_tamper(populated, tmp_path):
+    """A tampered raw source (row counts + store hash intact) is still caught
+    because every raw file hash is verified."""
+    import tarfile
+
+    out = ops.backup(dest_dir=tmp_path / "b")
+    work = tmp_path / "unpacked"
+    work.mkdir()
+    with tarfile.open(out["archive"], "r:gz") as tar:
+        tar.extractall(work, filter="data")
+    raw_files = [p for p in (work / "raw").rglob("*") if p.is_file()]
+    raw_files[0].write_bytes(raw_files[0].read_bytes() + b"tampered")
+    tampered = tmp_path / "b" / "health-backup-rawtamper.tar.gz"
+    with tarfile.open(tampered, "w:gz") as tar:
+        for p in sorted(work.rglob("*")):
+            if p.is_file():
+                tar.add(p, arcname=str(p.relative_to(work)))
+    res = ops.verify_backup(tampered)
+    assert res["ok"] is False
+    assert any(m.startswith("raw:") for m in res["mismatches"])
+
+
+def test_restore_rejects_traversal_member(populated, tmp_path):
+    """A tar member escaping the target is dropped by _safe_member."""
+    import tarfile
+
+    from app.health import ops as ops_mod
+    evil = tmp_path / "evil.tar.gz"
+    with tarfile.open(evil, "w:gz") as tar:
+        payload = b"pwned"
+        info = tarfile.TarInfo("../escaped.txt")
+        info.size = len(payload)
+        import io
+        tar.addfile(info, io.BytesIO(payload))
+        # also a minimal manifest so read_manifest works
+        man = b'{"created_at":"x","versions":{},"table_counts":{},' \
+              b'"store_sha256":"","raw_sha256":{}}'
+        mi = tarfile.TarInfo(ops_mod.MANIFEST_NAME)
+        mi.size = len(man)
+        tar.addfile(mi, io.BytesIO(man))
+    into = tmp_path / "restore-target"
+    ops.restore(evil, into, verify=False)
+    assert not (tmp_path / "escaped.txt").exists()   # never escaped
+
+
+def test_restore_refuses_worktree_target(populated):
+    out_dir = Path(__file__).resolve().parent / "wt-restore"
+    # Need a real archive; make one in a safe temp place.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        out = ops.backup(dest_dir=Path(td))
+        with pytest.raises(ops.OpsError, match="worktree"):
+            ops.restore(Path(out["archive"]), out_dir)
+    assert not out_dir.exists()
 
 
 def test_backup_refuses_worktree_destination(populated):
@@ -147,6 +215,18 @@ def test_delete_derived_is_regenerable_only(populated):
     assert _obs_count(populated) == 10
     lab_summary.write(populated)
     assert (populated / "reports" / "lab-summary.md").exists()
+
+
+def test_delete_derived_refuses_symlinked_dir(populated):
+    """Codex blocker: a symlinked derived/ -> raw/ must not delete raw data."""
+    derived = populated / "derived"
+    derived.rmdir()
+    derived.symlink_to(populated / "raw")
+    with pytest.raises(ops.OpsError, match="symlink"):
+        ops.delete_derived(populated)
+    # raw sources untouched.
+    assert list((populated / "raw").rglob("*"))
+    assert _obs_count(populated) == 10
 
 
 def test_purge_plan_enumerates_without_deleting(populated):
