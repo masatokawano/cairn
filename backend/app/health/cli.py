@@ -329,7 +329,9 @@ def interpret_draft_ai(
         typer.echo(f"draft rejected by safety gate: {exc}", err=True)
         raise typer.Exit(code=1)
     except Exception as exc:
-        typer.echo(f"draft failed: {type(exc).__name__}: {exc}", err=True)
+        # Only the exception TYPE — a provider error message can echo raw
+        # model output (health content). Details stay in the run record.
+        typer.echo(f"draft failed: {type(exc).__name__}", err=True)
         raise typer.Exit(code=1)
     finally:
         conn.close()
