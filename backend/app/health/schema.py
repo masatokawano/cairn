@@ -18,7 +18,7 @@ Column notes:
 """
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -177,8 +177,52 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 """
 
+# v4 (H6): interpretations with explicit evidence and revision history
+# (H-D5: append-only + supersede; DATA_MODEL §2.8-2.10). AI output is stored
+# ONLY here — never as observations or documents — with full provenance
+# (model, prompt version, data snapshot). interpretation_evidence audits
+# what one interpretation actually cited; it is NOT an auto-built knowledge
+# graph (D5 stays out of scope).
+INTERPRET_DDL = """
+CREATE TABLE IF NOT EXISTS data_snapshots (
+    id              TEXT PRIMARY KEY,
+    created_at      TIMESTAMPTZ NOT NULL,
+    query_spec_json TEXT NOT NULL,              -- metrics / since / until / caps
+    result_hash     TEXT NOT NULL,              -- hash of the ordered result set
+    row_count       BIGINT NOT NULL,
+    max_observed_at DATE,
+    catalog_version TEXT
+);
+
+CREATE TABLE IF NOT EXISTS interpretations (
+    id               TEXT PRIMARY KEY,
+    title            TEXT NOT NULL,
+    body_markdown    TEXT NOT NULL,
+    author_type      TEXT NOT NULL,             -- self / clinician / ai
+    author_label     TEXT NOT NULL,             -- 氏名 or cairn/<provider>/<model>
+    created_at       TIMESTAMPTZ NOT NULL,
+    model_id         TEXT,                      -- ai のとき必須
+    prompt_version   TEXT,                      -- ai のとき必須
+    data_snapshot_id TEXT,                      -- ai のとき必須
+    status           TEXT NOT NULL DEFAULT 'draft',  -- draft/accepted/superseded/rejected
+    supersedes_id    TEXT,
+    confidence       TEXT,                      -- low / medium / high
+    limitations      TEXT,
+    provenance_json  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS interpretation_evidence (
+    interpretation_id TEXT NOT NULL,
+    evidence_kind     TEXT NOT NULL,            -- observation/event/document/reference
+    evidence_id       TEXT NOT NULL,
+    role              TEXT NOT NULL,            -- supports/context/limitation
+    quoted_value      TEXT,
+    PRIMARY KEY (interpretation_id, evidence_kind, evidence_id)
+);
+"""
+
 # version -> DDL applied when upgrading TO that version (additive only).
-MIGRATIONS: dict[int, str] = {2: EVENTS_DDL, 3: DOCUMENTS_DDL}
+MIGRATIONS: dict[int, str] = {2: EVENTS_DDL, 3: DOCUMENTS_DDL, 4: INTERPRET_DDL}
 
 
 def apply(conn) -> None:

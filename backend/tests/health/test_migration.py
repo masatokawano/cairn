@@ -67,11 +67,34 @@ def test_newer_store_is_refused(health_home):
         store.connect()
 
 
-def test_v2_store_migrates_to_v3_documents(health_home):
-    """A v2 store (events but no documents) gains the documents table on
-    reopen, with a premigrate backup."""
+def test_v3_store_migrates_to_v4_interpretations(health_home):
+    """A v3 store gains interpretations/evidence/snapshots on reopen."""
     conn = store.connect(create=True)
-    conn.execute("DROP TABLE documents")
+    for t in ("interpretations", "interpretation_evidence", "data_snapshots"):
+        conn.execute(f"DROP TABLE {t}")
+    conn.execute("UPDATE schema_meta SET value='3' WHERE key='schema_version'")
+    conn.close()
+
+    conn = store.connect()
+    try:
+        info = store.counts(conn)
+    finally:
+        conn.close()
+    assert info["schema_version"] == schema.SCHEMA_VERSION
+    assert info["interpretations"] == 0
+    assert info["data_snapshots"] == 0
+    backups = list((config.resolve_home() / "backups").iterdir())
+    assert any(b.name.startswith("health.duckdb.premigrate-v3-to-v4-")
+               for b in backups)
+
+
+def test_v2_store_migrates_to_current(health_home):
+    """A v2 store (events, no documents/interpretations) reaches the current
+    version on reopen, with a premigrate backup naming the span."""
+    conn = store.connect(create=True)
+    for t in ("documents", "interpretations", "interpretation_evidence",
+              "data_snapshots"):
+        conn.execute(f"DROP TABLE {t}")
     conn.execute("UPDATE schema_meta SET value='2' WHERE key='schema_version'")
     conn.close()
 
@@ -80,8 +103,10 @@ def test_v2_store_migrates_to_v3_documents(health_home):
         info = store.counts(conn)
     finally:
         conn.close()
-    assert info["schema_version"] == 3
+    assert info["schema_version"] == schema.SCHEMA_VERSION
     assert info["documents"] == 0
+    assert info["interpretations"] == 0
     backups = list((config.resolve_home() / "backups").iterdir())
-    assert any(b.name.startswith("health.duckdb.premigrate-v2-to-v3-")
-               for b in backups)
+    assert any(b.name.startswith(
+        f"health.duckdb.premigrate-v2-to-v{schema.SCHEMA_VERSION}-")
+        for b in backups)

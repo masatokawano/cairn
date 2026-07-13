@@ -272,6 +272,158 @@ def document_list() -> None:
         conn.close()
 
 
+interpret_app = typer.Typer(
+    no_args_is_help=True,
+    help="Interpretations with evidence and revision history (H6). "
+         "AI output is a draft, never an authority — accept/reject is yours.",
+)
+health_app.add_typer(interpret_app, name="interpret")
+
+
+def _conn():
+    from . import config, store
+
+    return store.connect(config.resolve_home())
+
+
+@interpret_app.command("draft-ai")
+def interpret_draft_ai(
+    metric: list[str] = typer.Option(..., "--metric", "-m",
+                                     help="Canonical metric id (repeatable, max 8)."),
+    since: str | None = typer.Option(None, "--since", help="YYYY-MM-DD"),
+    until: str | None = typer.Option(None, "--until", help="YYYY-MM-DD"),
+    question: str | None = typer.Option(None, "--question", "-q"),
+    max_rows: int = typer.Option(50, "--max-rows",
+                                 help="Bounded model context (observations)."),
+    deliver: bool = typer.Option(
+        False, "--deliver",
+        help="Also write the draft into the vault's 00 Inbox/AI Drafts "
+             "(new file only). WARNING: AI Drafts IS synced to other "
+             "devices — unlike 90 Auto/Health it is not excluded.",
+    ),
+) -> None:
+    """Generate an AI interpretation draft (local ollama, full provenance)."""
+    from . import interpret
+
+    conn = _conn()
+    try:
+        out = interpret.ai_draft(conn, metrics=metric, since=since,
+                                 until=until, question=question,
+                                 max_rows=max_rows)
+        if deliver:
+            row = conn.execute(
+                "SELECT title, body_markdown, author_label, limitations,"
+                " confidence FROM interpretations WHERE id=?",
+                [out["interpretation_id"]]).fetchone()
+            from ..deliver import obsidian_writer
+            md = (f"# {row[0]}\n\n- generated_by: {row[2]}"
+                  f" (prompt v{out['prompt_version']}, draft — 採否は人間)\n"
+                  f"- confidence: {row[4]}\n\n{row[1]}\n\n"
+                  f"## Limitations\n\n{row[3]}\n")
+            path = obsidian_writer.write(
+                "draft", f"health-interpretation-{out['interpretation_id'][:8]}.md", md)
+            out["delivered_to"] = str(path)
+            typer.echo("note: AI Drafts は他端末へ同期されます（--deliver は明示 opt-in）",
+                       err=True)
+    except interpret.SafetyError as exc:
+        typer.echo(f"draft rejected by safety gate: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        # Only the exception TYPE — a provider error message can echo raw
+        # model output (health content). Details stay in the run record.
+        typer.echo(f"draft failed: {type(exc).__name__}", err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+    _echo(out)
+
+
+@interpret_app.command("add")
+def interpret_add(
+    title: str = typer.Option(..., "--title"),
+    body_file: Path = typer.Option(..., "--body-file",
+                                   help="Markdown file with the interpretation body."),
+    author: str = typer.Option("self", "--author", help="self / clinician"),
+    author_label: str | None = typer.Option(None, "--author-label",
+                                            help="Clinician name etc."),
+    evidence: list[str] = typer.Option(
+        [], "--evidence", "-e",
+        help="kind:id[:role] (kind=observation/event/document/reference,"
+             " role defaults to supports). Repeatable."),
+    supersedes: str | None = typer.Option(None, "--supersedes"),
+) -> None:
+    """Record a human interpretation (yours or a clinician's explanation)."""
+    from . import interpret
+
+    parsed = []
+    for item in evidence:
+        parts = item.split(":")
+        if len(parts) == 2:
+            parsed.append((parts[0], parts[1], "supports"))
+        elif len(parts) == 3:
+            parsed.append((parts[0], parts[1], parts[2]))
+        else:
+            typer.echo(f"bad --evidence {item!r} (kind:id[:role])", err=True)
+            raise typer.Exit(code=1)
+    conn = _conn()
+    try:
+        interp_id = interpret.add(
+            conn, author_type=author, author_label=author_label or author,
+            title=title, body_markdown=body_file.read_text("utf-8"),
+            evidence=parsed, supersedes=supersedes)
+    except interpret.InterpretError as exc:
+        typer.echo(f"add failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+    _echo({"interpretation_id": interp_id, "status": "draft"})
+
+
+@interpret_app.command("accept")
+def interpret_accept(interp_id: str) -> None:
+    """Accept a draft (human decision; requires at least one evidence row)."""
+    from . import interpret
+
+    conn = _conn()
+    try:
+        interpret.set_status(conn, interp_id, "accepted")
+    except interpret.InterpretError as exc:
+        typer.echo(f"accept failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+    _echo({"interpretation_id": interp_id, "status": "accepted"})
+
+
+@interpret_app.command("reject")
+def interpret_reject(interp_id: str) -> None:
+    """Reject a draft (kept forever — rejected interpretations are the 供養録)."""
+    from . import interpret
+
+    conn = _conn()
+    try:
+        interpret.set_status(conn, interp_id, "rejected")
+    finally:
+        conn.close()
+    _echo({"interpretation_id": interp_id, "status": "rejected"})
+
+
+@interpret_app.command("list")
+def interpret_list(
+    status: list[str] = typer.Option(
+        [], "--status", help="Filter (repeatable). "
+        "--status rejected --status superseded = 供養録."),
+) -> None:
+    """List interpretations (metadata only, bodies stay in the store)."""
+    from . import interpret
+
+    conn = _conn()
+    try:
+        _echo({"interpretations": interpret.listing(conn, status or None)})
+    finally:
+        conn.close()
+
+
 report_app = typer.Typer(no_args_is_help=True, help="Generate factual reports.")
 health_app.add_typer(report_app, name="report")
 

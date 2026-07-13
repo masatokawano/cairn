@@ -42,7 +42,14 @@
   で手動配信（launchd 自動化はしない）。H5-P1 決定記録（既定除外のまま、opt-in なし。
   Syncthing 索引に載らないことを実機確認）。テスト 10 件追加で **613 passed**。
   events.yml テンプレートを保護 home に設置（ドライラン検証済み）
-  残: 実 iPhone export の月次運用 → H6 AI 解釈（AI Drafts 項目含む）
+- 2026-07-13: **H6 AI 解釈と改訂履歴実装**。schema v4（interpretations /
+  interpretation_evidence / data_snapshots）。AI draft はローカル ollama
+  （qwen2.5、D10）で bounded evidence から生成、model/prompt/snapshot の
+  provenance 必須、安全ゲートで診断・服薬変更の断定を保存前拒否、evidence を
+  フェンスして指示と構造分離（PRIVACY §7）。accepted は人間 CLI + evidence 必須、
+  append-only supersede。供養録（rejected/superseded 一覧）。AI Drafts 配信は
+  opt-in（--deliver、同期される旨を警告）。テスト 12 件で **627 passed**。実機 store v4
+  残: 実運用（実データで解釈生成）→ H7 MCP → H8 運用（いずれも凍結明け相当・要レビュー）
 
 ## 採用基準
 
