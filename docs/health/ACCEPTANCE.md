@@ -149,16 +149,29 @@ manual (`cairn health deliver`) — no automatic vault writes from launchd yet.
 
 ## H6 — AI interpretation and validation trail
 
-- [ ] Interpretations are separate from observations, events, and documents.
-- [ ] AI interpretations record model ID, prompt version, creation time, and data snapshot.
-- [ ] Each consequential interpretation has an explicit evidence set.
-- [ ] An interpretation with no evidence cannot become `accepted`.
-- [ ] New analysis does not overwrite old analysis; it uses `supersedes_id` or an equivalent revision relation.
-- [ ] Limitations and uncertainty are stored with the interpretation.
-- [ ] Safety tests reject outputs that present diagnosis or medication changes as autonomous decisions.
-- [ ] Model context is bounded by metric, time range, aggregation, row count, and source type.
-- [ ] Embedded instructions in imported content do not override the analysis task.
-- [ ] Original source text and model synthesis remain structurally separate.
+- [x] Interpretations are separate from observations, events, and documents.
+- [x] AI interpretations record model ID, prompt version, creation time, and data snapshot.
+- [x] Each consequential interpretation has an explicit evidence set.
+- [x] An interpretation with no evidence cannot become `accepted`.
+- [x] New analysis does not overwrite old analysis; it uses `supersedes_id` or an equivalent revision relation.
+- [x] Limitations and uncertainty are stored with the interpretation.
+- [x] Safety tests reject outputs that present diagnosis or medication changes as autonomous decisions.
+- [x] Model context is bounded by metric, time range, aggregation, row count, and source type.
+- [x] Embedded instructions in imported content do not override the analysis task.
+- [x] Original source text and model synthesis remain structurally separate.
+
+H6 verified 2026-07-13 with the FixtureProvider stub (`tests/health/test_interpret.py`,
+`test_migration.py`; suite total 627 passed). Store schema v3→v4 (interpretations
+/ interpretation_evidence / data_snapshots) migrates additively with a
+premigrate backup; real store is v4. AI drafts require full provenance
+(model/prompt/snapshot), pass a safety gate that blocks autonomous
+diagnosis/medication language before storage, carry an explicit evidence set,
+and are stored as `draft` — acceptance is a separate human CLI act requiring
+evidence. Evidence values are fenced (CAIRN_HEALTH_DATA) and separated from
+instructions in the prompt. The Obsidian AI-Drafts delivery is opt-in
+(`--deliver`) and warns that AI Drafts, unlike 90 Auto/Health, IS synced.
+Local ollama (qwen2.5) is the default provider (D10); the interface is the
+existing structured-output LLMProvider contract.
 
 ## H7 — Cairn integration
 

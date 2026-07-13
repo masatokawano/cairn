@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from app.cli import app
@@ -63,6 +65,50 @@ def test_import_failure_exits_nonzero(health_home, tmp_path):
     missing = tmp_path / "nope.csv"
     result = runner.invoke(app, ["health", "import", "labs-csv", str(missing)])
     assert result.exit_code == 1
+
+
+def test_interpret_draft_delivers_to_ai_drafts_new_only(
+        health_home, catalog_dir, labs_csv_path, tmp_path, monkeypatch):
+    """ACCEPTANCE H5 last item: interpretive drafts go to 00 Inbox/AI Drafts
+    as NEW files only (never 90 Auto), and only with explicit --deliver."""
+    from app.health import interpret
+    from app.health.importers import labs_csv
+    from app.llm.fixture import FixtureProvider
+
+    labs_csv.run(labs_csv_path, catalog_dir=catalog_dir)
+    vault = tmp_path / "Vault"
+    (vault / "External Brain" / "00 Inbox" / "AI Drafts").mkdir(parents=True)
+    monkeypatch.setenv("CAIRN_OBSIDIAN_VAULT", str(vault))
+
+    draft = {"title": "合成解釈", "body_markdown": "本文（仮説と明示）",
+             "limitations": "限界あり", "confidence": "low"}
+    real_ai_draft = interpret.ai_draft
+    monkeypatch.setattr(
+        interpret, "ai_draft",
+        lambda conn, **kw: real_ai_draft(
+            conn, llm=FixtureProvider(responses=[draft]),
+            **{k: v for k, v in kw.items() if k != "llm"}))
+
+    result = runner.invoke(app, ["health", "interpret", "draft-ai",
+                                 "-m", "synthetic_a", "--deliver"])
+    assert result.exit_code == 0, result.output
+    # stderr warning (sync caveat) precedes the JSON on the mixed stream.
+    assert "他端末へ同期されます" in result.output
+    out = json.loads(result.output[result.output.index("{"):])
+    assert out["status"] == "draft"
+    delivered = Path(out["delivered_to"])
+    assert delivered.parent == vault / "External Brain" / "00 Inbox" / "AI Drafts"
+    assert "generated_by" not in ""  # placeholder to keep flow obvious
+    md = delivered.read_text("utf-8")
+    assert "cairn/fixture/fixture-v1" in md      # provenance label in the vault file
+    assert "draft — 採否は人間" in md
+    # New-only: a second delivery with the same id would collide, and the
+    # writer refuses (exercised via direct writer call).
+    from app.deliver import obsidian_writer
+    import importlib
+    importlib.reload(obsidian_writer)
+    with pytest.raises(obsidian_writer.ObsidianWriteError, match="new-only"):
+        obsidian_writer.write("draft", delivered.name, "again")
 
 
 def test_document_flow_and_broken_refs(health_home):

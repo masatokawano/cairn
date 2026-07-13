@@ -160,6 +160,25 @@ rawファイルはDB外へ保存し、DBにはパス、ハッシュ、サイズ�
 | imported_at | TIMESTAMPTZ | 登録日時 |
 | meta_json | JSON | 追加情報 |
 
+### 2.8〜2.10（H6 実装済み、schema v4）
+
+`interpretations` / `interpretation_evidence` / `data_snapshots` を実装。要点:
+- AI 生成物は**ここにのみ**入る（observations/documents には決して入らない）。
+  ai は model_id / prompt_version / data_snapshot_id 必須。author_type = self /
+  clinician / ai
+- append-only: 訂正は supersedes_id 付き新エントリ、旧行は status=superseded に
+  マークするのみで本文不変
+- accepted は人間の CLI 操作で、evidence が 1 件以上ないと accepted にできない。
+  安全ゲートで診断・服薬変更の断定を保存前に拒否（SafetyError）
+- interpretation_evidence は「その解釈が実際に参照した根拠」の監査表であって
+  supports/contradicts の知識グラフではない（D5 非目標）
+- AI プロンプトは evidence を CAIRN_HEALTH_DATA フェンスで囲み、指示位置と
+  構造分離（PRIVACY §7）。context は metric 数・行数で bounded
+- 供養録: rejected/superseded は削除されず `interpret list --status rejected
+  --status superseded` で振り返れる（HORIZONS 1.3）
+
+以下は当初の設計スキーマ（実装は上記に準拠、列は本文書の定義どおり）:
+
 ### 2.8 interpretations
 
 | column | type | meaning |
