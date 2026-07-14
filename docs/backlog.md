@@ -54,7 +54,12 @@
   observation selection/projection・event の hash と source/snapshot provenance を返す。
   合成 store の実 STDIO initialize/list/call と独立 security review を完了。health 133 / backend
   全体 651 tests passed（既知 warning 1）。
-  残: 実運用（実データで解釈生成）→ H8 運用（要レビュー）
+- 2026-07-13: **H8 バックアップ/復元/整合性/保持/削除実装**。`app/health/ops.py`:
+  tar.gz スナップショット（store+raw+reports+manifest、temp+atomic rename、live store は
+  read-only）、restore は counts+hash 検証、verify、rotate（--keep N）、delete-derived
+  （再生成可能物のみ）、purge（全 dir 列挙 + 明示確認フラグ必須）。PRIVACY §10 に暗号化
+  宛先・保持ポリシー明記。launchd 自動化と実破壊操作は不変条件8で手動。backend 664 passed
+  残: 実運用（実データで解釈生成）→ H9 汎用 validation 評価（凍結明け・実運用データ後）
 
 ## 採用基準
 

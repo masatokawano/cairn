@@ -168,6 +168,29 @@ Requirements:
 - deletion procedure that enumerates raw files, database, derived data, reports, and backups;
 - explicit user confirmation for destructive deletion.
 
+### H8 implementation and operating policy
+
+- **Tooling** (`app/health/ops.py`): `cairn health backup create` writes a
+  single `.tar.gz` (store + raw + reports + derived + quarantine + a manifest
+  of versions/counts/hashes) to `<home>/backups` by default; `restore --into`
+  and `verify` check counts and hashes; `backup rotate --keep N` prunes old
+  archives; `delete-derived` clears regenerable data; `purge` deletes the
+  whole home behind an explicit flag after enumerating it.
+- **Encryption**: the archive is written plaintext. The default data home is
+  on a FileVault-protected disk. **Any backup copied off this machine must go
+  to an encrypted destination** — an encrypted external volume, or piped
+  through `age`/`gpg`. `backup create` refuses a destination inside the git
+  worktree; it does not itself encrypt, so off-machine copies are the
+  operator's responsibility.
+- **Retention**: keep the newest 7 local archives (`backup rotate --keep 7`)
+  plus at least one off-machine encrypted copy. Run a restore test into a
+  throwaway home after any catalog/schema change.
+- **No silent cloud replication**: backups are never written to a synced or
+  cloud location automatically; `<home>/backups` is inside the data home,
+  which is excluded from vault sync.
+- **launchd**: automated periodic backup via launchd is NOT enabled by
+  default; enabling it is an explicit, human, invariant-8 action.
+
 ### Vault replication of health reports (decision H5-P1)
 
 Health reports delivered to `90 Auto/Health/` would otherwise replicate to
