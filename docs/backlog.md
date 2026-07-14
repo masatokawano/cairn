@@ -115,6 +115,14 @@ status doc §5.1 の詳細参照。
 status doc §5.2 参照（pin/mute、会話添付 OCR、Karakeep 本文抜粋拡充、MCP ツール追加、
 外部 embedding provider、週次レビュー書式改訂）。**実装ではなく改訂提案から始めること。**
 
+- **D-social（pre-ADR 済み・批准待ち）**: X / Facebook の**自作 + 明示的キュレーション
+  のみ**の取り込み。公式エクスポート parser（`x_archive` / `facebook_dyi`）、
+  自作 → 新 `items.kind='social_post'`（schema v13 追加のみ）、いいね/ブックマークは
+  既存 `bookmark` kind 再利用 + urlnorm dedup。フィード・DM・他人コンテンツ・
+  エンゲージメント指標は非目標（§8 追記予定）。詳細は
+  [`docs/adr/0006-social-activity-ingest.md`](adr/0006-social-activity-ingest.md)。
+  未確定: X ブックマークが公式アーカイブに含まれるか（実 export で確認）
+
 ## E. 旧 Phase 3 系（凍結・着手禁止）
 
 旧 backlog にあった Phase 3 抽出パイプライン系の候補（P3-A〜G のバックフィル・拡張）は
