@@ -54,6 +54,14 @@
   observation selection/projection・event の hash と source/snapshot provenance を返す。
   合成 store の実 STDIO initialize/list/call と独立 security review を完了。health 133 / backend
   全体 651 tests passed（既知 warning 1）。
+- 2026-07-14: **ADR-0006 批准 + ソーシャル取り込み実装**（feature/adr-social-ingest）。
+  schema v13（items.kind CHECK に `social_post`、v12 型再構築 migration・id 保存）、
+  `parsers/x_archive.py`・`facebook_dyi.py`（公式エクスポートのみ、自作+キュレーション
+  限定を regex で構造強制、DYI mojibake 復号、宛先文脈保持）、`cairn import x|facebook`
+  （redaction 経由 → 索引 → item_links）、MCP/検索/UI に social_post。DESIGN.md §8
+  非目標 10 追記。Codex 独立レビュー approve（SHOULD 2 件反映: FB 本人限定仮定の
+  検知カウンタ、X 本文なしスキップ）。backend **691 passed**。
+  残: 実データ import（FB は手元、X アーカイブ未入手）は merge + 本番 v13 適用後
 - 2026-07-13: **H8 バックアップ/復元/整合性/保持/削除実装**。`app/health/ops.py`:
   tar.gz スナップショット（store+raw+reports+manifest、temp+atomic rename、live store は
   read-only）、restore は counts+hash 検証、verify、rotate（--keep N）、delete-derived
@@ -115,13 +123,13 @@ status doc §5.1 の詳細参照。
 status doc §5.2 参照（pin/mute、会話添付 OCR、Karakeep 本文抜粋拡充、MCP ツール追加、
 外部 embedding provider、週次レビュー書式改訂）。**実装ではなく改訂提案から始めること。**
 
-- **D-social（pre-ADR 済み・批准待ち）**: X / Facebook の**自作 + 明示的キュレーション
-  のみ**の取り込み。公式エクスポート parser（`x_archive` / `facebook_dyi`）、
-  自作 → 新 `items.kind='social_post'`（schema v13 追加のみ）、いいね/ブックマークは
-  既存 `bookmark` kind 再利用 + urlnorm dedup。フィード・DM・他人コンテンツ・
-  エンゲージメント指標は非目標（§8 追記予定）。詳細は
-  [`docs/adr/0006-social-activity-ingest.md`](adr/0006-social-activity-ingest.md)。
-  未確定: X ブックマークが公式アーカイブに含まれるか（実 export で確認）
+- **D-social（2026-07-14 批准済み・実装中）**: X / Facebook の**自作 + 明示的
+  キュレーションのみ**の取り込み。公式エクスポート parser（`x_archive` /
+  `facebook_dyi`）、自作 → 新 `items.kind='social_post'`（schema v13）、いいね/
+  ブックマークは既存 `bookmark` kind 再利用 + urlnorm dedup。§8 非目標 10 追記済み。
+  詳細は [`docs/adr/0006-social-activity-ingest.md`](adr/0006-social-activity-ingest.md)
+  （Accepted）。実 FB DYI で構造検証済み。X ブックマークは「アーカイブにあれば
+  取り込む、無ければ対象外」の条件付き（X アーカイブ未入手）
 
 ## E. 旧 Phase 3 系（凍結・着手禁止）
 

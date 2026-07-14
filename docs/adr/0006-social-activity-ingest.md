@@ -1,6 +1,7 @@
 # ADR-0006: Ingest self-authored and self-curated social activity (X / Facebook)
 
-- Status: Draft（pre-ADR。批准前の設計提案。実装着手前にオーナー承認が必要）
+- Status: **Accepted**（2026-07-14 オーナー批准。X ブックマークは Open question 1 の
+  条件付き =「公式アーカイブにあれば取り込む、無ければ対象外」のまま批准）
 - Date: 2026-07-14
 - Decision owner: Repository owner
 - Related documents:

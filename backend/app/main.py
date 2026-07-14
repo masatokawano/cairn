@@ -165,7 +165,7 @@ def sync_now():
 # items.kind values for /api/search filtering. Named distinctly from the
 # Phase-3 _VALID_KINDS below (assertion kinds) — module-level rebinding
 # would otherwise silently swap the sets.
-_SEARCH_KINDS = {"conversation", "bookmark", "reference", "note"}
+_SEARCH_KINDS = {"conversation", "bookmark", "reference", "note", "social_post"}
 
 
 @app.get("/api/search")

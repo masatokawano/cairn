@@ -5,7 +5,7 @@ type SearchMode = 'keyword' | 'semantic' | 'hybrid'
 
 type MatchReason = 'keyword' | 'semantic' | 'both'
 
-type ItemKind = 'conversation' | 'bookmark' | 'reference' | 'note'
+type ItemKind = 'conversation' | 'bookmark' | 'reference' | 'note' | 'social_post'
 
 type SearchHit = {
   conversation_id: number | null // null for external items (M2)
@@ -109,6 +109,7 @@ const KINDS: { key: ItemKind; label: string }[] = [
   { key: 'conversation', label: '会話' },
   { key: 'bookmark', label: 'ブックマーク' },
   { key: 'reference', label: '文献' },
+  { key: 'social_post', label: '発信' }, // ADR-0006: 自作ソーシャル投稿
 ]
 
 const sourceLabel = (key: string) => SOURCES.find((s) => s.key === key)?.label ?? key

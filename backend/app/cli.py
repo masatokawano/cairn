@@ -26,10 +26,15 @@ sync_app = typer.Typer(
 )
 review_app = typer.Typer(no_args_is_help=True, help="Weekly review (M4).")
 index_app = typer.Typer(no_args_is_help=True, help="Derived-data rebuilds (M2/M6).")
+import_app = typer.Typer(
+    no_args_is_help=True,
+    help="One-shot imports of official export archives (ADR-0006: x / facebook).",
+)
 
 app.add_typer(sync_app, name="sync")
 app.add_typer(review_app, name="review")
 app.add_typer(index_app, name="index")
+app.add_typer(import_app, name="import")
 
 # Health domain (ADR-0005/H0): independent store, never cairn.db. The sub-app
 # module is import-light; duckdb loads only inside its commands.
@@ -127,6 +132,71 @@ def sync_all() -> None:
     typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
     if out["failed"]:
         raise typer.Exit(code=1)
+
+
+def _ingest_social(source: str, groups: list[tuple[str, list[dict]]]) -> dict:
+    """Shared ingest tail for social imports (ADR-0006): upsert each
+    (kind, records) group through the redaction choke point, then chunk/embed
+    only the changed items and rebuild item_links — the same post-steps as a
+    connector sync, so social items get keyword/semantic search and Karakeep
+    URL dedup for free."""
+    from . import db
+    from .connectors import index_changed_items
+
+    out: dict = {"source": source, "kinds": {}}
+    changed: list[int] = []
+    for kind, records in groups:
+        stats = db.upsert_items(source, kind, records)
+        out["kinds"][kind] = {
+            "fetched": len(records),
+            "inserted": stats["inserted"],
+            "updated": stats["updated"],
+            "skipped": stats["skipped"],
+        }
+        changed += stats["changed_ids"]
+    out["index"] = index_changed_items(changed) if changed else None
+    out["links"] = db.rebuild_item_links() if changed else None
+    return out
+
+
+@import_app.command("x")
+def import_x(
+    path: str = typer.Argument(
+        ..., help="X「データのアーカイブ」ZIP、または展開済みディレクトリ"),
+) -> None:
+    """Ingest self-authored X posts/replies + likes/bookmarks (ADR-0006).
+
+    自作 → items.kind='social_post'、いいね/ブックマーク → kind='bookmark'
+    （meta.social_source/action）。フィード・DM・他人のコンテンツは parser が
+    そもそも読まない。"""
+    from .parsers.x_archive import parse_x_archive
+
+    res = parse_x_archive(path)
+    out = _ingest_social("x", [
+        ("social_post", res.posts),
+        ("bookmark", res.likes + res.bookmarks),
+    ])
+    out["archive_counts"] = res.counts
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+@import_app.command("facebook")
+def import_facebook(
+    path: str = typer.Argument(
+        ..., help="Facebook「Download Your Information」ZIP、または展開済みディレクトリ"),
+) -> None:
+    """Ingest self-authored Facebook posts + own comments (ADR-0006).
+
+    投稿・自作コメント → items.kind='social_post'。いいね/リアクション・
+    他人のコンテンツ・メディアは parser がそもそも読まない。"""
+    from .parsers.facebook_dyi import parse_facebook_dyi
+
+    res = parse_facebook_dyi(path)
+    out = _ingest_social("facebook", [
+        ("social_post", res.posts + res.comments),
+    ])
+    out["archive_counts"] = res.counts
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
 
 
 @review_app.command("weekly")

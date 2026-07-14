@@ -232,7 +232,7 @@ def test_migration_v11_backfills_items_and_chunk_item_id(db, tmp_path):
     ).fetchone()[0]
     assert chunk_item_ids[0] == item_id
 
-    backups = glob.glob(str(tmp_path / "*.premigrate-v10-to-v12-*"))
+    backups = glob.glob(str(tmp_path / f"*.premigrate-v10-to-v{db._SCHEMA_VERSION}-*"))
     assert len(backups) == 1
     assert oct(os.stat(backups[0]).st_mode & 0o777) == "0o600"
 
@@ -248,7 +248,7 @@ def test_migration_v11_reopen_is_noop(db, tmp_path):
 
     db.connect()
     assert _user_version(db) == db._SCHEMA_VERSION
-    backups = glob.glob(str(tmp_path / "*.premigrate-v10-to-v12-*"))
+    backups = glob.glob(str(tmp_path / f"*.premigrate-v10-to-v{db._SCHEMA_VERSION}-*"))
     assert len(backups) == 1  # still just the one from the initial migration
 
 
@@ -280,3 +280,183 @@ def test_migration_v11_fresh_vs_migrated_schema_equivalence(db, tmp_path):
 
     assert fresh_cols == migrated_cols
     assert fresh_indexes == migrated_indexes
+
+
+def _seed_v12_shape_db(path):
+    """Build a v12-shape DB with raw SQL: items with the pre-v13 CHECK (no
+    'social_post'), item_links, and a chunks row anchored to an item — so the
+    v13 items rebuild can be verified to preserve ids that other tables
+    reference. user_version stamped to 12."""
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            source TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            created_at TEXT,
+            updated_at TEXT,
+            content_hash TEXT NOT NULL,
+            meta TEXT NOT NULL DEFAULT '{}',
+            UNIQUE(source, source_id)
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TEXT,
+            source_message_id TEXT
+        );
+        CREATE TABLE items (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note')),
+            source TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            title TEXT,
+            url TEXT,
+            url_norm TEXT,
+            doi TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            content_hash TEXT,
+            meta TEXT,
+            UNIQUE (source, external_id)
+        );
+        CREATE INDEX idx_items_url_norm ON items(url_norm) WHERE url_norm IS NOT NULL;
+        CREATE INDEX idx_items_doi      ON items(doi)      WHERE doi IS NOT NULL;
+        CREATE INDEX idx_items_updated  ON items(kind, updated_at);
+        CREATE TABLE item_links (
+            a_id     INTEGER NOT NULL REFERENCES items(id),
+            b_id     INTEGER NOT NULL REFERENCES items(id),
+            link_via TEXT NOT NULL CHECK (link_via IN ('url','doi','github')),
+            PRIMARY KEY (a_id, b_id, link_via),
+            CHECK (a_id < b_id)
+        );
+        CREATE TABLE sync_state (
+            source     TEXT PRIMARY KEY,
+            cursor     TEXT NOT NULL,
+            synced_at  TEXT NOT NULL,
+            last_error TEXT
+        );
+        CREATE TABLE chunks (
+            id INTEGER PRIMARY KEY,
+            message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+            conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            start_offset INTEGER NOT NULL,
+            end_offset INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'message_text',
+            chunking_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            item_id INTEGER REFERENCES items(id),
+            CHECK ((message_id IS NOT NULL AND conversation_id IS NOT NULL) OR item_id IS NOT NULL)
+        );
+        INSERT INTO items (kind, source, external_id, title, url, url_norm, content_hash, meta)
+        VALUES ('bookmark', 'karakeep', 'kb1', 'ブックマーク', 'https://example.com/a',
+                'https://example.com/a', 'h1', '{}');
+        INSERT INTO items (kind, source, external_id, title, url, url_norm, content_hash, meta)
+        VALUES ('reference', 'zotero', 'zt1', '文献', 'https://example.com/a',
+                'https://example.com/a', 'h2', '{}');
+        INSERT INTO item_links (a_id, b_id, link_via) VALUES (1, 2, 'url');
+        INSERT INTO chunks (message_id, conversation_id, idx, start_offset, end_offset,
+                            text, kind, chunking_version, created_at, item_id)
+        VALUES (NULL, NULL, 0, 0, 6, 'ブックマーク', 'item_text', 'v1', '2025-01-01T00:00:00Z', 1);
+        PRAGMA user_version = 12;
+    """)
+    conn.commit()
+    conn.close()
+
+
+def test_migration_v13_widens_items_kind(db, tmp_path):
+    """v12→v13 rebuilds items with the widened CHECK: rows and ids are
+    preserved (item_links / chunks.item_id keep resolving), 'social_post'
+    becomes insertable, invalid kinds stay rejected, FK integrity is clean."""
+    import sqlite3
+
+    db_path = tmp_path / "test.db"
+    _reset_conn(db)
+    _seed_v12_shape_db(str(db_path))
+
+    conn = db.connect()
+    assert _user_version(db) == db._SCHEMA_VERSION
+
+    # Rows and ids preserved verbatim.
+    rows = conn.execute(
+        "SELECT id, kind, source, external_id, url_norm FROM items ORDER BY id"
+    ).fetchall()
+    assert [(r["id"], r["kind"], r["source"], r["external_id"]) for r in rows] == [
+        (1, "bookmark", "karakeep", "kb1"),
+        (2, "reference", "zotero", "zt1"),
+    ]
+
+    # References into items survived the rebuild.
+    assert tuple(conn.execute("SELECT a_id, b_id FROM item_links").fetchone()) == (1, 2)
+    assert conn.execute("SELECT item_id FROM chunks WHERE kind='item_text'").fetchone()[0] == 1
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    # The widened CHECK admits social_post…
+    with conn:
+        conn.execute(
+            "INSERT INTO items (kind, source, external_id, title, meta)"
+            " VALUES ('social_post', 'x', 'x:1', 'テスト投稿', '{}')"
+        )
+    assert conn.execute(
+        "SELECT kind FROM items WHERE external_id='x:1'"
+    ).fetchone()[0] == "social_post"
+
+    # …and still rejects anything else.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO items (kind, source, external_id) VALUES ('feed', 'x', 'x:2')"
+        )
+
+    # UNIQUE(source, external_id) also survived.
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO items (kind, source, external_id) VALUES ('bookmark', 'karakeep', 'kb1')"
+        )
+
+
+def test_migration_v13_fresh_vs_migrated_items_equivalence(db, tmp_path):
+    """Fresh (_SCHEMA) and migrated (v12→v13) DBs must agree on the items
+    table shape and indexes — guards _SCHEMA/_MIGRATIONS drift, same as the
+    v11 equivalence test does for chunks."""
+    fresh_cols = [r[1] for r in db.connect().execute("PRAGMA table_info(items)")]
+    fresh_indexes = {r[0] for r in db.connect().execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='items'"
+        " AND name NOT LIKE 'sqlite_autoindex%'"
+    ).fetchall()}
+    fresh_sql = db.connect().execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
+    ).fetchone()[0]
+    assert "social_post" in fresh_sql
+
+    migrated_path = tmp_path / "migrated.db"
+    _seed_v12_shape_db(str(migrated_path))
+    import importlib
+    import os as _os
+    _os.environ["CAIRN_DB"] = str(migrated_path)
+    from app import db as db_module
+    importlib.reload(db_module)
+    db_module.connect()
+    migrated_cols = [r[1] for r in db_module.connect().execute("PRAGMA table_info(items)")]
+    migrated_indexes = {r[0] for r in db_module.connect().execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='items'"
+        " AND name NOT LIKE 'sqlite_autoindex%'"
+    ).fetchall()}
+    migrated_sql = db_module.connect().execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
+    ).fetchone()[0]
+    conn = getattr(db_module._local, "conn", None)
+    if conn:
+        conn.close()
+        db_module._local.conn = None
+
+    assert fresh_cols == migrated_cols
+    assert fresh_indexes == migrated_indexes
+    assert "social_post" in migrated_sql

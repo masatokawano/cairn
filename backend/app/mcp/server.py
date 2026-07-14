@@ -35,7 +35,12 @@ from . import pack as _pack
 # text) are part of the item's index text and therefore already returned
 # inside the fenced `body` — repeating them here would hand external text to
 # the model outside a fence.
-_META_WHITELIST = ("type", "itemType", "favourited", "archived", "date", "folder")
+_META_WHITELIST = ("type", "itemType", "favourited", "archived", "date", "folder",
+                   # ADR-0006 social structural keys. Free-text social meta
+                   # (author, reply_to_context, text) stays OUT — same
+                   # rationale as description/note: untrusted free text is
+                   # only surfaced fenced, never as structural metadata.
+                   "social_source", "action", "post_type")
 
 mcp = FastMCP(
     "cairn",
