@@ -44,6 +44,7 @@ def test_snapshot_freezes_bounded_rows(populated):
         assert snap["row_count"] == 5            # 2 + 3 obs
         again = interpret.create_snapshot(conn, metrics=["synthetic_a", "synthetic_b"])
         assert snap["result_hash"] == again["result_hash"]   # deterministic
+        assert snap["id"] != again["id"]     # each analysis has its own record
         capped = interpret.create_snapshot(conn, metrics=["synthetic_a",
                                                           "synthetic_b"], max_rows=2)
         assert capped["row_count"] == 2          # bounded context

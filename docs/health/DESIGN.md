@@ -211,17 +211,23 @@ creatinine:
 
 ### 4.5 Cairn integration
 
-H5以降で、生成済みMarkdownをObsidian connector経由で通常のnoteとして索引する。
-健康ストアを`items`へ1サンプルずつ登録しない。
+`90 Auto/Health` の生成物は自己還流防止のため索引しない。人間が確認して通常の
+索引対象ディレクトリ（`10 Themes` 等）へ昇格した summary だけを既存 Obsidian
+connector が通常 note として索引する。健康ストアを`items`へ1サンプルずつ登録しない。
 
-H7のMCP候補:
+H7 MCP は通常 Cairn MCP から独立し、既定無効・read-only とする。実装ツール:
 
-- `health_get_current_status`
-- `health_get_timeline`
-- `health_query_observations`
-- `health_compare_periods`
-- `health_get_event_response`
-- `health_build_visit_brief`
+- `health_current_status(metrics, include_events=false)`
+- `health_query_observations(metrics, since?, until?, max_rows?)`
+- `health_compare_event(event_id, metrics, window_days?)`
+- `health_data_quality(metrics)`
+- `health_interpretation_history(statuses?)`
+- `health_get_interpretation(interpretation_id)`
+- `health_build_context_pack(metrics, ..., include_events=false, include_interpretations=false)`
+
+metric は最大8、観測行は最大300、既定期間366日・最大3650日。free text は fence
+と文字数上限を適用し、context pack は selection/projection/event の hash、source ID/
+category、含めた interpretation の data snapshot ID を返す。
 
 ## 5. データフロー
 

@@ -301,6 +301,19 @@
   する（`server` は `from . import MAX_BODY_CHARS` で自 module に束ねているため、パッケージ
   `app.mcp` 側の属性を差し替えても効かない）。
 
+## Health MCP（H7 / `app/health/mcp_*` + `run_health_mcp.py`）
+
+- DuckDB の read-only consumer は通常の `store.connect()` を使わない。`connect_readonly()`
+  で migration を拒否し、MCP の snapshot は永続化せず content-addressed ID/hash を返す。
+  永続 H6 snapshot は分析イベントごとの UUID のままにし、read-only identity と混同しない。
+- minimum disclosure は行数 cap だけでは足りない。metric を必須にし、期間・free-text・evidence
+  も別々に上限を持たせる。event/interpretation は既定除外し、解釈を含める場合は **全 evidence**
+  が同じ context pack の明示 snapshot 内にあることを検証する（一部 observation の一致だけで
+  採用すると、未選択 event/document/reference の内容が title 経由で漏れ得る）。
+- provenance は「選択した原値行の hash」と「実際に返した正規化 projection の hash」を分ける。
+  正規化値だけが変わった場合、前者は同じでも後者が変わるため、返却 payload を pin するには
+  両方が必要。event は別 snapshot hash、各 fact は observation/source ID を保持する。
+
 ## 運用の通知・再構築（M6 / `app/ops.py` + launchd）
 
 - **失敗通知は終了コード基準（stderr は見ない）**。エージェントの stderr は

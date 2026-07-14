@@ -175,23 +175,50 @@ existing structured-output LLMProvider contract.
 
 ## H7 — Cairn integration
 
-- [ ] High-frequency observations are not inserted one-by-one into Cairn `items` or `chunks`.
-- [ ] Cairn indexes report metadata and approved human-readable summaries only.
-- [ ] Health-domain retrieval can be disabled independently.
-- [ ] MCP tools are opt-in and have conservative default limits.
-- [ ] A context pack identifies all included data snapshots and source categories.
-- [ ] Failure of the health store does not corrupt `cairn.db`.
-- [ ] Failure of Cairn search does not corrupt the health store.
+- [x] High-frequency observations are not inserted one-by-one into Cairn `items` or `chunks`.
+- [x] Cairn indexes report metadata and approved human-readable summaries only.
+- [x] Health-domain retrieval can be disabled independently.
+- [x] MCP tools are opt-in and have conservative default limits.
+- [x] A context pack identifies all included data snapshots and source categories.
+- [x] Failure of the health store does not corrupt `cairn.db`.
+- [x] Failure of Cairn search does not corrupt the health store.
+
+H7 verified 2026-07-13 with synthetic data. `cairn-health` is a separate
+read-only STDIO process and refuses startup unless `CAIRN_HEALTH_MCP=1`.
+Tool inputs require explicit metrics (maximum 8); observation rows, periods,
+events, interpretations, evidence, and free-text fields are independently
+bounded. Context packs expose content-addressed observation selection and
+returned projection hashes, an event snapshot hash, source IDs/categories,
+and interpretation snapshot IDs. Tests cover actual MCP initialize/list/call,
+read-only write rejection, error redaction, and both database-failure isolation
+directions. Auto-generated `90 Auto/Health` reports remain outside the index;
+only human-promoted notes under the existing Obsidian index allowlist enter
+`cairn.db`. Final regression: health 133 passed; backend total 651 passed
+(1 pre-existing Starlette deprecation warning).
 
 ## H8 — Backup, restore, and deletion
 
-- [ ] Raw sources, database, catalog versions, and report metadata can be snapshotted consistently.
-- [ ] Restore into an empty test environment reproduces record counts and hashes.
-- [ ] Derived data can be deleted and regenerated.
-- [ ] Backup failure does not destroy a successful import.
-- [ ] Retention and encrypted destination requirements are documented.
-- [ ] Destructive deletion lists raw, store, derived, reports, quarantine, and backups.
-- [ ] Destructive deletion requires explicit confirmation.
+- [x] Raw sources, database, catalog versions, and report metadata can be snapshotted consistently.
+- [x] Restore into an empty test environment reproduces record counts and hashes.
+- [x] Derived data can be deleted and regenerated.
+- [x] Backup failure does not destroy a successful import.
+- [x] Retention and encrypted destination requirements are documented.
+- [x] Destructive deletion lists raw, store, derived, reports, quarantine, and backups.
+- [x] Destructive deletion requires explicit confirmation.
+
+H8 verified 2026-07-13 with synthetic data (`tests/health/test_ops.py`,
+CLI flow in `test_cli.py`; backend total 664 passed). `app/health/ops.py`:
+`backup` writes a single `.tar.gz` (store + raw + reports + derived +
+quarantine + `MANIFEST.json` with schema/catalog/mapping versions, table
+counts, store + per-raw sha256) via a temp file + atomic rename, read-only
+w.r.t. the live store, and refuses a worktree destination; `restore` extracts
+into an empty home and verifies counts + store hash against the manifest;
+`verify_backup` probes an archive's store hash; `rotate_backups` keeps the
+newest N (backup files only). `delete_derived` removes only regenerable
+derived/reports; `purge` enumerates all six dirs and requires an exact
+confirmation token (CLI `--yes-delete-everything`). Retention + encrypted-
+destination requirements are in `PRIVACY.md` §10. launchd automation of
+backups and any real destructive delete stay manual (AGENTS.md invariant 8).
 
 ## Local real-data verification
 

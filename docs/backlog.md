@@ -49,7 +49,17 @@
   フェンスして指示と構造分離（PRIVACY §7）。accepted は人間 CLI + evidence 必須、
   append-only supersede。供養録（rejected/superseded 一覧）。AI Drafts 配信は
   opt-in（--deliver、同期される旨を警告）。テスト 12 件で **627 passed**。実機 store v4
-  残: 実運用（実データで解釈生成）→ H7 MCP → H8 運用（いずれも凍結明け相当・要レビュー）
+- 2026-07-13: **H7 read-only Health MCP 実装**。通常 Cairn MCP と分離し既定無効、
+  metric 必須 + 行/期間/free-text 上限、event/interpretation は別 opt-in。context pack は
+  observation selection/projection・event の hash と source/snapshot provenance を返す。
+  合成 store の実 STDIO initialize/list/call と独立 security review を完了。health 133 / backend
+  全体 651 tests passed（既知 warning 1）。
+- 2026-07-13: **H8 バックアップ/復元/整合性/保持/削除実装**。`app/health/ops.py`:
+  tar.gz スナップショット（store+raw+reports+manifest、temp+atomic rename、live store は
+  read-only）、restore は counts+hash 検証、verify、rotate（--keep N）、delete-derived
+  （再生成可能物のみ）、purge（全 dir 列挙 + 明示確認フラグ必須）。PRIVACY §10 に暗号化
+  宛先・保持ポリシー明記。launchd 自動化と実破壊操作は不変条件8で手動。backend 664 passed
+  残: 実運用（実データで解釈生成）→ H9 汎用 validation 評価（凍結明け・実運用データ後）
 
 ## 採用基準
 
