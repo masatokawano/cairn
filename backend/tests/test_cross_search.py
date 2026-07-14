@@ -349,8 +349,8 @@ def test_migration_v12_rebuilds_chunks_preserving_ids(db, tmp_path, monkeypatch)
     conn.close()
     db._local.conn = None
 
-    conn = db.connect()  # reopen → migration 12
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+    conn = db.connect()  # reopen → migrations 12+ (up to the current version)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     # chunk survived with the same id; NOT NULL is gone (CHECK in place)
     row = conn.execute("SELECT id, message_id, item_id FROM chunks").fetchone()
     assert row["id"] == chunk_id and row["item_id"] == 1

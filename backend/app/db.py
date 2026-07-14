@@ -126,10 +126,11 @@ CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at);
 -- bookmarks (karakeep, M1), references (zotero, M1), and notes (obsidian, M3).
 -- Search / recall / linking all pivot on items. Kind-specific detail lives in
 -- the per-kind tables (conversations here; future karakeep/zotero/obsidian
--- item tables under M1/M3).
+-- item tables under M1/M3). social_post (v13, ADR-0006): self-authored
+-- X/Facebook posts, replies and comments from official export archives.
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note')),
+    kind TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note','social_post')),
     source TEXT NOT NULL,
     external_id TEXT NOT NULL,
     title TEXT,
@@ -659,7 +660,47 @@ PRAGMA foreign_keys=ON;
 # collide on rowid (Codex M2 review, should #2). Everything runs in one
 # transaction, so a crashed first run leaves no partial state either.
 
-_SCHEMA_VERSION = 12
+# Migration 13 (ADR-0006): widen items.kind CHECK to admit 'social_post'
+# (self-authored X/Facebook content from official export archives). SQLite
+# cannot ALTER a CHECK constraint, so this is a table rebuild — the same
+# proven pattern as migration 12's chunks rebuild. items is DERIVED data
+# (invariant 3: rebuildable from originals + external sources), a premigrate
+# backup is taken automatically, and ids are copied verbatim so item_links
+# (a_id/b_id) and chunks.item_id stay valid. foreign_keys must be OFF around
+# DROP/RENAME for the same reason as v12: item_links/chunks reference items
+# by name and must not cascade or block during the swap.
+_MIGRATION_13_SOCIAL_KIND = """
+PRAGMA foreign_keys=OFF;
+BEGIN;
+CREATE TABLE items_v13 (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note','social_post')),
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    title TEXT,
+    url TEXT,
+    url_norm TEXT,
+    doi TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    content_hash TEXT,
+    meta TEXT,
+    UNIQUE (source, external_id)
+);
+INSERT INTO items_v13
+    SELECT id, kind, source, external_id, title, url, url_norm, doi,
+           created_at, updated_at, content_hash, meta
+    FROM items;
+DROP TABLE items;
+ALTER TABLE items_v13 RENAME TO items;
+CREATE INDEX IF NOT EXISTS idx_items_url_norm ON items(url_norm) WHERE url_norm IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_doi      ON items(doi)      WHERE doi IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_items_updated  ON items(kind, updated_at);
+COMMIT;
+PRAGMA foreign_keys=ON;
+"""
+
+_SCHEMA_VERSION = 13
 _MIGRATIONS: list[tuple[int, str]] = [
     (2, _MIGRATION_2_IMPORT_RUNS),       # add import_runs to pre-v2 DBs
     (3, _MIGRATION_3_MSG_SOURCE_ID),     # add messages.source_message_id to pre-v3 DBs
@@ -672,6 +713,7 @@ _MIGRATIONS: list[tuple[int, str]] = [
     (10, _MIGRATION_10_ASSERTIONS),      # add assertions table to pre-v10 DBs (P3-D)
     (11, _MIGRATION_11_ITEMS),           # add items/item_links/sync_state + chunks.item_id (M0, DESIGN.md §4)
     (12, _MIGRATION_12_ITEM_CHUNKS),     # rebuild chunks for external items + chunks_fts (M2, DESIGN.md §7)
+    (13, _MIGRATION_13_SOCIAL_KIND),     # widen items.kind CHECK for social_post (ADR-0006)
 ]
 
 

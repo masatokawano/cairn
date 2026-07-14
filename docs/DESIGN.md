@@ -178,7 +178,7 @@ Cairn は Karakeep/Zotero/Obsidian に対して**読み取り専用**。原本�
 
 ```
 backend/app/
-├── parsers/       # 既存: AI会話の取り込み
+├── parsers/       # 既存: AI会話の取り込み + ソーシャル公式エクスポート（ADR-0006: x_archive / facebook_dyi）
 ├── connectors/    # 新規: karakeep.py, zotero.py, obsidian.py（read-only クライアント）
 ├── core/
 │   └── urlnorm.py # 新規: URL/DOI 正規化
@@ -200,7 +200,7 @@ ops/launchd/       # 新規: plist テンプレート
 -- 全ソース横断のレジストリ。検索・関連付け・再浮上はすべて items 起点。
 CREATE TABLE items (
     id            INTEGER PRIMARY KEY,
-    kind          TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note')),
+    kind          TEXT NOT NULL CHECK (kind IN ('conversation','bookmark','reference','note','social_post')),  -- social_post: v13, ADR-0006
     source        TEXT NOT NULL,          -- 'claude','chatgpt','karakeep','zotero','obsidian',...
     external_id   TEXT NOT NULL,          -- 元システムの ID（conversation id / karakeep id / zotero key / vault相対パス）
     title         TEXT,
@@ -435,6 +435,9 @@ CREATE TABLE sync_state (
 7. マルチユーザー・クラウドホスティング・スマホネイティブアプリ
 8. Obsidian のテーマ/プロジェクトノートの自動編集（AI Drafts への提案のみ可）
 9. PDF 本文の索引（Zotero は書誌+abstract まで。将来検討事項であって現スコープ外)
+10. ソーシャル（X / Facebook）は**自作＋明示的キュレーション（いいね/ブックマーク）のみ**。
+    フィード・タイムライン・ソーシャルグラフ・エンゲージメント指標・DM・他人のコンテンツ
+    一般の取り込み、およびライブ API / スクレイピングによる取得 — ADR-0006
 
 ---
 

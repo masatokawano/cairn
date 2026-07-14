@@ -28,8 +28,8 @@ MAX_BODY_CHARS = 8000
 MAX_TITLE = 120
 
 VALID_SOURCES = ("chatgpt", "claude", "gemini", "claude_cli", "codex_cli",
-                 "karakeep", "zotero", "obsidian")
-VALID_KINDS = ("conversation", "bookmark", "reference", "note")
+                 "karakeep", "zotero", "obsidian", "x", "facebook")
+VALID_KINDS = ("conversation", "bookmark", "reference", "note", "social_post")
 VALID_MODES = ("keyword", "semantic", "hybrid")
 
 
