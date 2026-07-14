@@ -19,9 +19,15 @@ DESIGN.md §7 のマイルストーン M0〜M6 を順に実施し、**M6①②�
 | M5 | MCP サーバ（4 系統横断の read-only ツール） | 完了 |
 | M6 | 運用の仕上げ | ①②完了・③実運用評価中（〜2026-07 下旬） |
 
-Health domain（正典: `docs/health/ROADMAP.md`）は H0〜H7 完了、次は H8
-（backup / restore / integrity / retention を含む長期運用）。H7 は独立・既定無効の
-read-only Health MCP として 2026-07-13 に完了した。
+Health domain（正典: `docs/health/ROADMAP.md`）は **H0〜H8 完了**（2026-07-13）。
+独立・既定無効の read-only Health MCP（H7）+ backup / restore / integrity /
+retention / deletion（H8）まで。次は実運用（実データで解釈生成）→ 凍結明け後に
+H9 汎用 validation 評価。
+
+ソーシャル取り込み（正典: `docs/adr/0006-social-activity-ingest.md`、Accepted）は
+**FB 取り込み完了**（2026-07-14）。X / Facebook の自作 + 明示的キュレーションのみを
+公式エクスポートから索引（`items.kind='social_post'`、schema v13）。本番 `cairn.db` に
+FB DYI 実データ取り込み済み。残は X アーカイブ取り込み（未入手）。
 
 各マイルストーンの詳細（背景・完了条件・非目標）は DESIGN.md §7 と §8 を参照。
 

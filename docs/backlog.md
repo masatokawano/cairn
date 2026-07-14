@@ -123,13 +123,17 @@ status doc §5.1 の詳細参照。
 status doc §5.2 参照（pin/mute、会話添付 OCR、Karakeep 本文抜粋拡充、MCP ツール追加、
 外部 embedding provider、週次レビュー書式改訂）。**実装ではなく改訂提案から始めること。**
 
-- **D-social（2026-07-14 批准済み・実装中）**: X / Facebook の**自作 + 明示的
-  キュレーションのみ**の取り込み。公式エクスポート parser（`x_archive` /
-  `facebook_dyi`）、自作 → 新 `items.kind='social_post'`（schema v13）、いいね/
-  ブックマークは既存 `bookmark` kind 再利用 + urlnorm dedup。§8 非目標 10 追記済み。
-  詳細は [`docs/adr/0006-social-activity-ingest.md`](adr/0006-social-activity-ingest.md)
-  （Accepted）。実 FB DYI で構造検証済み。X ブックマークは「アーカイブにあれば
-  取り込む、無ければ対象外」の条件付き（X アーカイブ未入手）
+- **D-social（2026-07-14 批准 + FB 取り込み完了。X は未取り込み）**: X / Facebook の
+  **自作 + 明示的キュレーションのみ**の取り込み。ADR-0006（Accepted）、§8 非目標 10。
+  実装 PR #15（schema v13 / `parsers/x_archive`・`facebook_dyi` / `cairn import x|facebook`）
+  + PR #16（検索スケーリング修正）ともに merge 済み。
+  - **完了（2026-07-14）**: 本番 `cairn.db` に FB DYI 実データ取り込み済み
+    （social_post 46,299 = post 36,467 + comment 9,832、Karakeep と item_links 56 件、
+    本人限定・他人コンテンツ混入 0 を実データで検証）。v13 は launchd sync 経由で
+    本番適用済み・整合性検証済み。
+  - **残**: ① X アーカイブ未入手 → 入手後に bookmark 有無を確認して ADR Open
+    question 1 を閉じ、`cairn import x` で取り込み。② メディア（写真）は非取り込み
+    のまま（ADR 決定）
 
 ## E. 旧 Phase 3 系（凍結・着手禁止）
 
