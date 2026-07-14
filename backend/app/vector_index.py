@@ -270,13 +270,28 @@ class SQLiteVecIndex(VectorIndex):
         else:
             if not candidates:
                 return []
-            placeholders = ",".join("?" * len(candidates))
-            rows = conn.execute(
-                f"SELECT rowid, distance FROM {_VEC_TABLE} "
-                f"WHERE embedding MATCH ? AND k = ? AND rowid IN ({placeholders}) "
-                f"ORDER BY distance",
-                (query, k, *candidates),
-            ).fetchall()
+            # `rowid IN (...)` binds one host parameter per candidate. A large
+            # single-model archive can exceed SQLite's variable limit (the
+            # NumpyIndex path batches for the same reason), so chunk the
+            # candidates: each batch runs the vec0 KNN over its subset and the
+            # per-batch top-k are merged. A globally k-nearest rowid is also
+            # within the top-k of whatever batch holds it, so the union of the
+            # batch results is a superset of the true top-k — re-sorting the
+            # merged rows by distance and taking k is exact.
+            limit = conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+            batch_size = max(1, limit - 8)  # reserve MATCH query + k params
+            rows = []
+            for i in range(0, len(candidates), batch_size):
+                batch = candidates[i:i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                rows.extend(conn.execute(
+                    f"SELECT rowid, distance FROM {_VEC_TABLE} "
+                    f"WHERE embedding MATCH ? AND k = ? AND rowid IN ({placeholders}) "
+                    f"ORDER BY distance",
+                    (query, k, *batch),
+                ).fetchall())
+            rows.sort(key=lambda r: r["distance"])
+            rows = rows[:k]
         # cosine distance in [0,2]; we want score in [-1,1] with higher = closer
         return [(r["rowid"], 1.0 - r["distance"]) for r in rows]
 

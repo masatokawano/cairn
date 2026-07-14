@@ -194,3 +194,39 @@ def test_1000_vector_search_completes_quickly(db):
     assert len(hits) == 10
     assert hits[0]["text"] == "text-500"
     assert elapsed < 1.0, f"search took {elapsed:.3f}s"
+
+
+def test_sqlite_vec_candidates_exceeding_variable_limit(db, monkeypatch):
+    """A candidate set larger than SQLite's host-variable limit must not raise
+    'too many SQL variables' — the vec0 path batches like NumpyIndex, and the
+    batched merge returns the same top-k. Regression for the failure surfaced
+    by a large social_post import (ADR-0006), reproduced here by forcing the
+    limit down to a tiny value so a handful of candidates already exceeds it."""
+    import sqlite3
+
+    db.upsert_conversations([_make_conv(f"c{i}", f"text-{i}") for i in range(60)])
+    provider = FixtureProvider()
+    db.embed_chunks(provider)
+    q = provider.embed_query("text-42")  # exact match must still rank first
+    assert db.vector_index().name == "sqlite-vec"
+
+    # Force batching by actually lowering the connection's variable limit to
+    # 12 → batch_size 4, so 60 candidates span 15 batches. The unpatched code
+    # would build a single 60-variable IN-clause and raise.
+    conn = db.connect()
+    prev = conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 12)
+    try:
+        hits_batched = db.find_similar_chunks(q, provider="fixture", model="fixture-v1", k=5)
+    finally:
+        conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, prev)
+    assert [h["text"] for h in hits_batched][0] == "text-42"
+    assert len(hits_batched) == 5
+
+    # Same query, numpy backend (already batches) — identical top-k ordering.
+    monkeypatch.setenv("CAIRN_VECTOR_INDEX", "numpy")
+    importlib.reload(__import__("app.db", fromlist=["x"]))
+    from app import db as db_module
+    db_module.connect()
+    assert db_module.vector_index().name == "numpy"
+    hits_np = db_module.find_similar_chunks(q, provider="fixture", model="fixture-v1", k=5)
+    assert [h["chunk_id"] for h in hits_batched] == [h["chunk_id"] for h in hits_np]
