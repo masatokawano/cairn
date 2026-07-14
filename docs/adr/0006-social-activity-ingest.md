@@ -110,11 +110,44 @@ MCP／LLM へ渡す際は既存の `CAIRN_ARCHIVE_DATA` フェンスを必ず適
    可能性がある。含まれなければブックマークだけ有料 API 依存となり方針外。
    **「アーカイブにあれば取り込む、無ければ対象外」**とし、実 export を 1 つ
    確認して確定する（いいねは `like.js` の `fullText` で確実に取得可能）。
+   **未検証**: 手元にあるのは Facebook DYI のみで X アーカイブは未入手。
 2. **削除・編集の扱い**: 原本（items）は破壊せず、再エクスポートは既存の
    差分インポート。ソーシャルで消した過去発言が Cairn に残ることの是非は
    本人決定（既定: 残す。原本不変の原則に従う）。
-3. **FB「自分のコメント」の抽出単位**: DYI の `comments.json` から自分の
-   コメントのみを抽出し、他人のコメント・スレッド文脈は取り込まない。
+3. ~~**FB「自分のコメント」の抽出単位**~~ → **解消**（下記「実 export 検証」参照）。
+   `comments_and_reactions/comments.json` は DYI が既に本人のコメントのみに
+   絞っており（distinct author = 1）、追加のフィルタ不要。
+4. **FB コメントの宛先（誰の投稿へのコメントか）を残す**（オーナー決定
+   2026-07-14）: 各コメントの `title` は「◯◯さんの投稿／写真にコメント
+   しました」「◯◯さんのコメントに返信しました」形式で、コメント先の
+   投稿者名を含む。これは**本人の行為の文脈（宛先）であり自作以外の本文
+   取り込みではない**（他人の投稿本文は comments.json に存在せず取り込まない）。
+   よって parser は**本人のコメント本文 + timestamp に加え、復号した `title`
+   を宛先文脈として保持する**（誰の投稿へのコメントだったかが残る）。
+   宛先投稿者を構造化フィールドに分離するかは実装時裁量（title 文字列の
+   保持で最低要件は満たす）。
+
+## 実 export 検証（2026-07-14、Facebook DYI）
+
+実 Facebook DYI ZIP（1 件）の**構造のみ**を確認（本文はリポジトリ／テストに
+持ち込まない。不変条件 9 の精神）。判明した実装事実:
+
+- **自作コメント**: `comments_and_reactions/comments.json` →
+  `comments_v2[]`、各 `data[].comment.{timestamp, comment, author}` + `title`。
+  10,024 レコード中 9,832 が本文あり（残りはスタンプ／写真のみ → skip）。
+  author は全件同一（本人）。
+- **自作投稿**: `posts/your_posts__check_ins__photos_and_videos_{1..5}.json` →
+  レコード配列 `{timestamp, data[].post, attachments[].data[].external_context.url,
+  title}`。1 ファイル 10,000 件中 9,504 が本文あり、6,621 が外部リンク付き
+  → **X と同様、urlnorm/item_links で Karakeep と自動 dedup できる**。
+- **FB いいね／リアクション**（`likes_and_reactions*.json`、140 ファイル）は
+  **オーナー指定の FB スコープ外**（FB は投稿＋自作コメントのみ）。parser は
+  読み込まない。
+- **文字化け復号が必須**（新規実装要件）: DYI のテキストは「UTF-8 バイト列を
+  latin-1 として再解釈」した mojibake。parser で `s.encode('latin-1').decode('utf-8')`
+  による復元が必要（実データ 2,998/3,000 タイトルで復元を確認）。
+- **メディア**（`media/**/*.jpg` 等のバイナリ）は取り込まない。投稿本文と
+  コメント本文（テキスト知識）のみが対象で、写真は参照もしない（表面積最小）。
 
 ## Required changes if accepted
 
@@ -124,7 +157,10 @@ MCP／LLM へ渡す際は既存の `CAIRN_ARCHIVE_DATA` フェンスを必ず適
 3. DESIGN.md §5.1（parsers）に `x_archive` / `facebook_dyi` を追記、
    `items.kind` に `social_post` を追加する migration（v13、追加のみ）。
 4. `app/parsers/x_archive.py` / `facebook_dyi.py` 実装（自作 → social_post、
-   いいね/ブックマーク → bookmark + social meta）。
+   いいね/ブックマーク → bookmark + social meta）。`facebook_dyi.py` は
+   mojibake 復号（latin-1→utf-8）と本文なしレコード skip を必須とし、
+   FB コメントは本文＋timestamp＋宛先文脈（復号 title＝誰の投稿へのコメント
+   だったか）を保持する。
 5. MCP フェンス・エスケープの適用確認、実 export での取得可否検証（open q.1）。
 6. backlog D から本項目を除去し、到達点へ記録。
 
