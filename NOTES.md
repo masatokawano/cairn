@@ -437,6 +437,15 @@
   - **`rowid IN (?)` 単一要素は SQLite が `rowid = ?` に書換える**結果、vec0 が
     LIMIT 制約を検知できず `A LIMIT or 'k = ?' constraint is required` で失敗する。
     解決: `LIMIT` ではなく `k = ?` 制約を使う（書換えに耐える）。
+  - **候補 chunk_id を `rowid IN (...)` に全部渡すと SQLite 変数上限で落ちる**
+    （`too many SQL variables`）。`find_similar_chunks` は候補を SQL 変数として
+    KNN に渡す設計なので、単一モデルの候補プールが上限（SQLite 3.32+ は 32766）を
+    超えると semantic/hybrid が全滅する。NumpyIndex は 900 件バッチ済みだが
+    `SQLiteVecIndex.search` は未バッチだった（2026-07-14、social_post 46k 取り込みで
+    顕在化）。解決: `conn.getlimit(SQLITE_LIMIT_VARIABLE_NUMBER)` でバッチ幅を決め、
+    各バッチの top-k をマージ（グローバル k-近傍は必ずどれかのバッチの top-k に入る
+    ので、マージ後に再ソート→k で正確）。**新しい検索経路を足すときは候補数が
+    上限を超え得るか必ず確認する。**
 - `db.connect()` で `enable_load_extension(True)` → `sqlite_vec.load(conn)` を試行し、
   thread-local に成否を保存（`_sqlite_vec_loaded()`）。ロード後は `enable_load_extension(False)`
   に戻して攻撃面を最小化（SECURITY.md にも反映）。
