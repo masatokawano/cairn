@@ -63,8 +63,12 @@ class EventsError(Exception):
     never labels, notes or doses (they may reach logs)."""
 
 
-def _parse_when(raw) -> tuple[str | None, date | None, date | None, str]:
-    """→ (raw_text, earliest, latest, precision)."""
+def _parse_when(raw, where: str) -> tuple[str | None, date | None, date | None, str]:
+    """→ (raw_text, earliest, latest, precision).
+
+    `where` locates the failing field for error messages (e.g. "entry 'x'
+    start"). The raw value is NEVER put in the exception — a malformed date
+    field can carry arbitrary free text (PRIVACY.md §5: no values in errors)."""
     if raw is None:
         return None, None, None, "unknown"
     text = raw.isoformat() if isinstance(raw, date) else str(raw).strip()
@@ -81,8 +85,8 @@ def _parse_when(raw) -> tuple[str | None, date | None, date | None, str]:
         return (text, month_start, month_start.replace(day=last),
                 precision_hint or "month")
     except ValueError:
-        raise EventsError(f"unparseable date (expected YYYY-MM-DD, YYYY-MM,"
-                          f" or ~prefix): {core!r}")
+        raise EventsError(f"{where}: unparseable date"
+                          f" (expected YYYY-MM-DD, YYYY-MM, or ~prefix)")
 
 
 def _entry_hash(entry: dict) -> str:
@@ -210,8 +214,10 @@ def run(source: str | Path, *, home: Path | None = None) -> dict:
                     f"entry {entry_id!r} supersedes unknown id {supersedes!r}"
                 )
 
-            start_raw, start_lo, start_hi, precision = _parse_when(entry.get("start"))
-            end_raw, end_lo, end_hi, _ = _parse_when(entry.get("end")) \
+            start_raw, start_lo, start_hi, precision = _parse_when(
+                entry.get("start"), f"entry {entry_id!r} start")
+            end_raw, end_lo, end_hi, _ = _parse_when(
+                entry.get("end"), f"entry {entry_id!r} end") \
                 if entry.get("end") is not None else (None, None, None, None)
 
             if start_raw is None:
