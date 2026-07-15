@@ -230,6 +230,18 @@ def _fmt_day(ts_str: str | None) -> str:
     return f"{ts.astimezone():%Y-%m-%d}" if ts else "?"
 
 
+def _snippet(value: str | None, limit: int = 200) -> str | None:
+    """Untrusted summary/description → one collapsed line, clipped to
+    ``limit`` BEFORE escaping (clipping after _esc could cut an escape
+    sequence in half and leave a dangling backslash). None when empty."""
+    collapsed = " ".join((value or "").split())
+    if not collapsed:
+        return None
+    if len(collapsed) > limit:
+        collapsed = collapsed[: limit - 1] + "…"
+    return _esc(collapsed)
+
+
 def _activity_lines(activity: dict) -> list[str]:
     lines = ["## 今週の活動", ""]
 
@@ -244,6 +256,16 @@ def _activity_lines(activity: dict) -> list[str]:
         if url:
             entry += f" {url}"
         lines.append(entry)
+        # §5.4 要約行 (v1.4): Karakeep's AI summary, else the page description,
+        # so the review is readable without opening the bookmark (S1). Both
+        # fields are untrusted external text → collapsed + clipped + escaped.
+        summary = _snippet(row["meta"].get("summary"))
+        if summary:
+            lines.append(f"  - 要約: {summary}")
+        else:
+            description = _snippet(row["meta"].get("description"))
+            if description:
+                lines.append(f"  - 概要: {description}")
     if not activity["discoveries"]:
         lines.append("_なし_")
     lines.append("")

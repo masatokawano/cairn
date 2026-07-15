@@ -263,3 +263,51 @@ def test_target_exists_checks_containment(env, tmp_path):
     from app.deliver import obsidian_writer
     with pytest.raises(obsidian_writer.ObsidianWriteError):
         obsidian_writer.target_exists("weekly", "2026-W27.md")
+
+
+def test_discovery_summary_line_with_description_fallback(env):
+    """§5.4 要約行 (v1.4): each discovery gets a sub-line from Karakeep's AI
+    summary, falling back to the page description; nothing when both absent.
+    Untrusted text is collapsed, clipped and escaped."""
+    db, vault = env
+    # 1) AI summary present → 要約 line (summary wins over description)
+    add_item(db, "karakeep", "bookmark", "bm-sum",
+             title="要約ありブックマーク", url="https://example.com/s",
+             created=THIS_WEEK, updated=THIS_WEEK,
+             summary="AI が生成した要約です [注入](http://evil.example)",
+             description="こちらは使われない説明")
+    # 2) description only → 概要 line
+    add_item(db, "karakeep", "bookmark", "bm-desc",
+             title="説明のみブックマーク", url="https://example.com/d",
+             created=THIS_WEEK, updated=THIS_WEEK,
+             description="ページのメタ説明\nが複数行でも 1 行に潰される")
+    # 3) neither → no sub-line
+    add_item(db, "karakeep", "bookmark", "bm-none",
+             title="素のブックマーク", url="https://example.com/n",
+             created=THIS_WEEK, updated=THIS_WEEK)
+    # 4) long summary is clipped with an ellipsis
+    add_item(db, "karakeep", "bookmark", "bm-long",
+             title="長文要約", url="https://example.com/l",
+             created=THIS_WEEK, updated=THIS_WEEK,
+             summary="あ" * 500)
+
+    from app.deliver import weekly_review
+    out = weekly_review.run(now=NOW, llm=fixture_llm([DRAFT]))
+    md = (weekly_dir(vault) / "2026-W27.md").read_text()
+
+    # summary preferred, escaped (no active markdown link survives)
+    assert "  - 要約: AI が生成した要約です" in md
+    assert "[注入](http://evil.example)" not in md
+    assert "こちらは使われない説明" not in md
+    # description fallback, collapsed to one line, labelled 概要
+    assert "  - 概要: ページのメタ説明 が複数行でも 1 行に潰される" in md
+    # no sub-line for the bare bookmark
+    bare = [l for l in md.splitlines() if "素のブックマーク" in l]
+    assert bare, "bare bookmark line missing"
+    idx = md.splitlines().index(bare[0])
+    next_line = md.splitlines()[idx + 1]
+    assert not next_line.startswith("  - 要約") and not next_line.startswith("  - 概要")
+    # clipping: 500 chars → 200 incl. ellipsis
+    long_lines = [l for l in md.splitlines() if l.startswith("  - 要約: ああ")]
+    assert long_lines and long_lines[0].endswith("…")
+    assert len(long_lines[0]) < 250
