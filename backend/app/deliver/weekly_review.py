@@ -42,9 +42,9 @@ from . import obsidian_writer
 from .auto_lists import _esc, _now_local, _parse_ts, _url, _wikilink
 
 PROMPT_VERSION = "prompt_v1"
-# D10: weekly drafts default to the 14b model (32b via CAIRN_OLLAMA_MODEL);
-# tag naming follows the extraction default (llm/ollama.py).
-DEFAULT_MODEL = "qwen2.5:14b-instruct-q4_K_M"
+# D10 draft default (14b; 32b via CAIRN_OLLAMA_MODEL) — single source of truth
+# in llm/ollama.py so weekly / context pack / Health share one contract.
+from ..llm.ollama import CHAT_DEFAULT_MODEL as DEFAULT_MODEL  # noqa: E402
 MANUAL_EXPORT_SOURCES = ("chatgpt", "claude", "gemini")
 DEFAULT_STALE_DAYS = 30
 

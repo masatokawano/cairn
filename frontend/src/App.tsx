@@ -101,14 +101,18 @@ const SOURCES: { key: string; label: string }[] = [
   { key: 'codex_cli', label: 'codex CLI' },
   { key: 'karakeep', label: 'Karakeep' },
   { key: 'zotero', label: 'Zotero' },
+  { key: 'obsidian', label: 'Obsidian' }, // M3
+  { key: 'x', label: 'X' }, // ADR-0006
+  { key: 'facebook', label: 'Facebook' }, // ADR-0006
 ]
 
-// items.kind filter chips (M2). 'note' arrives with the Obsidian connector
-// (M3) and is omitted until it exists in the registry.
+// items.kind filter chips (M2). Every kind the registry can hold is listed
+// so the UI can filter the whole data model (note: M3 / social_post: ADR-0006).
 const KINDS: { key: ItemKind; label: string }[] = [
   { key: 'conversation', label: '会話' },
   { key: 'bookmark', label: 'ブックマーク' },
   { key: 'reference', label: '文献' },
+  { key: 'note', label: 'ノート' }, // M3: Obsidian
   { key: 'social_post', label: '発信' }, // ADR-0006: 自作ソーシャル投稿
 ]
 

@@ -420,10 +420,21 @@ def interpret_draft_ai(
                 " confidence FROM interpretations WHERE id=?",
                 [out["interpretation_id"]]).fetchone()
             from ..deliver import obsidian_writer
-            md = (f"# {row[0]}\n\n- generated_by: {row[2]}"
-                  f" (prompt v{out['prompt_version']}, draft — 採否は人間)\n"
-                  f"- confidence: {row[4]}\n\n{row[1]}\n\n"
-                  f"## Limitations\n\n{row[3]}\n")
+            from ..deliver.auto_lists import _esc
+            # Provenance in the regulated form cairn/<model>/<prompt_version>
+            # (DESIGN §6.2, AGENTS 不変条件4) — same shape as weekly drafts.
+            provenance = f"cairn/{out['model']}/{out['prompt_version']}"
+            # title / limitations are prose positions → escape untrusted LLM
+            # text so injected markdown can't build links/embeds there.
+            # body_markdown is intentionally rendered AS markdown (owner
+            # decision 2026-07-15; documented trust boundary in PRIVACY §7):
+            # it is locally-generated, opt-in delivered, and needs formatting.
+            md = (f"# {_esc(row[0])}\n\n"
+                  f"- generated_by: {provenance}\n"
+                  f"- draft — 採否は人間\n"
+                  f"- confidence: {row[4]}\n\n"
+                  f"{row[1]}\n\n"
+                  f"## Limitations\n\n{_esc(row[3])}\n")
             path = obsidian_writer.write(
                 "draft", f"health-interpretation-{out['interpretation_id'][:8]}.md", md)
             out["delivered_to"] = str(path)

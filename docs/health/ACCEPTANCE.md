@@ -138,7 +138,7 @@ broken-reference detection (`cairn health report broken-refs`, also a
 - [x] Auto-generated reports stay within `90 Auto/Health`.
 - [x] The new `health` writer category (`90 Auto/Health`, overwrite allowed) is enforced by the same allowlist and path-validation tests as the existing categories, and `AGENTS.md` invariant 2 is revised in the same change.
 - [x] The vault-replication decision (H5-P1 in `PRIVACY.md` §10) is made and applied before the first real-data report is delivered; until then `90 Auto/Health` is excluded from every vault sync mechanism.
-- [ ] Interpretive drafts use `00 Inbox/AI Drafts` and are created as new files only. （H6 で実装 — 配信機構の "draft" カテゴリは既存）
+- [x] Interpretive drafts use `00 Inbox/AI Drafts` and are created as new files only. （H6 で実装・テスト済み: `cairn health interpret draft-ai --deliver`、`test_cli.py` の new-only 検証。provenance/エスケープは 2026-07-15 R4 で規定形式へ）
 
 H5 verified 2026-07-13 (front-loaded before the M6③ freeze lift by owner
 instruction 2026-07-12; the freeze protects the cairn.db evaluation, which

@@ -98,9 +98,10 @@ def test_interpret_draft_delivers_to_ai_drafts_new_only(
     assert out["status"] == "draft"
     delivered = Path(out["delivered_to"])
     assert delivered.parent == vault / "External Brain" / "00 Inbox" / "AI Drafts"
-    assert "generated_by" not in ""  # placeholder to keep flow obvious
     md = delivered.read_text("utf-8")
-    assert "cairn/fixture/fixture-v1" in md      # provenance label in the vault file
+    # Regulated provenance form cairn/<model>/<prompt_version> (R4 review):
+    # fixture model is "fixture-v1", interpret.PROMPT_VERSION is "1".
+    assert "generated_by: cairn/fixture-v1/1" in md
     assert "draft — 採否は人間" in md
     # New-only: a second delivery with the same id would collide, and the
     # writer refuses (exercised via direct writer call).
@@ -109,6 +110,52 @@ def test_interpret_draft_delivers_to_ai_drafts_new_only(
     importlib.reload(obsidian_writer)
     with pytest.raises(obsidian_writer.ObsidianWriteError, match="new-only"):
         obsidian_writer.write("draft", delivered.name, "again")
+
+
+def test_interpret_draft_escapes_hostile_title_and_limitations(
+        health_home, catalog_dir, labs_csv_path, tmp_path, monkeypatch):
+    """R4 (2026-07-15 review): injected markdown in title/limitations must be
+    neutralised in the delivered AI Draft (no active links/embeds), while the
+    body is rendered as markdown by design. Regulated provenance is present."""
+    from app.health import interpret
+    from app.health.importers import labs_csv
+    from app.llm.fixture import FixtureProvider
+
+    labs_csv.run(labs_csv_path, catalog_dir=catalog_dir)
+    vault = tmp_path / "Vault"
+    (vault / "External Brain" / "00 Inbox" / "AI Drafts").mkdir(parents=True)
+    monkeypatch.setenv("CAIRN_OBSIDIAN_VAULT", str(vault))
+
+    # Non-medical markdown injection (won't trip the diagnosis/medication gate).
+    draft = {
+        "title": "見出し [EVIL](http://evil.example) <img src=x>",
+        "body_markdown": "## 本文の見出し\n\n- 仮説の箇条書き",
+        "limitations": "注記 ![leak](http://evil.example/pixel.png)",
+        "confidence": "low",
+    }
+    real_ai_draft = interpret.ai_draft
+    monkeypatch.setattr(
+        interpret, "ai_draft",
+        lambda conn, **kw: real_ai_draft(
+            conn, llm=FixtureProvider(responses=[draft]),
+            **{k: v for k, v in kw.items() if k != "llm"}))
+
+    result = runner.invoke(app, ["health", "interpret", "draft-ai",
+                                 "-m", "synthetic_a", "--deliver"])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.output[result.output.index("{"):])
+    md = Path(out["delivered_to"]).read_text("utf-8")
+
+    # title/limitations: metacharacters escaped → no active link/embed survives.
+    assert "[EVIL](http://evil.example)" not in md
+    assert "![leak](http://evil.example/pixel.png)" not in md
+    assert "\\[EVIL\\]\\(http://evil.example\\)" in md   # escaped form present
+    assert "<img src=x>" not in md                       # angle brackets escaped
+    # body: markdown preserved by design (headings/lists render).
+    assert "## 本文の見出し" in md
+    assert "- 仮説の箇条書き" in md
+    # regulated provenance label still present.
+    assert "generated_by: cairn/fixture-v1/1" in md
 
 
 def test_document_flow_and_broken_refs(health_home):

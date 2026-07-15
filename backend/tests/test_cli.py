@@ -202,3 +202,32 @@ def test_index_rebuild_runs_on_empty_db(cli):
     assert payload["chunks_items"]["chunks"] == 0
     assert isinstance(payload["embeddings"], str) and "skipped" in payload["embeddings"]
     assert payload["item_links"]["total"] == 0
+
+
+def test_index_rebuild_is_gap_fill_not_full_regen(cli):
+    """R2 (2026-07-15 review): `index rebuild`'s contract is gap-fill, not full
+    regeneration (DESIGN §5.7). A chunk already at the current version is
+    skipped — its text is NOT rebuilt from the origin — so corrupted derived
+    data survives. True regeneration is admin's job; this test locks the
+    documented gap-fill contract so it can't drift back to claiming a rebuild."""
+    import json
+    from app import db
+    from app.parsers.base import ParsedConversation, ParsedMessage
+
+    db.upsert_conversations([ParsedConversation(
+        source="chatgpt", source_id="c1", title="t",
+        messages=[ParsedMessage(role="user", text="元の本文",
+                                created_at="2025-01-01T00:00:00Z")],
+        created_at="2025-01-01T00:00:00Z", updated_at="2025-01-01T00:00:00Z")])
+    conn = db.connect()
+    # Corrupt an existing chunk's derived text.
+    conn.execute("UPDATE chunks SET text='CORRUPTED'")
+    conn.commit()
+
+    result = CliRunner().invoke(cli.app, ["index", "rebuild"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # Gap-fill skips the already-versioned chunk: no rechunk, so corruption
+    # is intentionally NOT repaired (that is admin rechunk --all's job).
+    assert payload["chunks_messages"]["chunks"] == 0
+    assert conn.execute("SELECT text FROM chunks").fetchone()[0] == "CORRUPTED"

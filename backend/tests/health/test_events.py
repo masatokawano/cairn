@@ -140,3 +140,20 @@ def test_validation_errors_do_not_leak_content(health_home, tmp_path, caplog):
         with pytest.raises(events_yaml.EventsError):
             events_yaml.run(bad)
     assert "SECRET-NOTE" not in caplog.text
+
+
+def test_unparseable_date_error_omits_raw_value(health_home, tmp_path):
+    """R5 (2026-07-15 review): a malformed date field can carry arbitrary free
+    text; the EventsError message must name the entry+field but never the raw
+    value (PRIVACY.md §5). The CLI surfaces this message verbatim."""
+    bad = tmp_path / "bad_date.yml"
+    # The whole 'start' value is a malformed date carrying a sensitive token.
+    bad.write_text(
+        "- id: evt-sensitive\n  kind: medication\n"
+        "  start: 2031-04-01-LEAKY-CONTEXT-TOKEN\n", "utf-8")
+    with pytest.raises(events_yaml.EventsError) as ei:
+        events_yaml.run(bad)
+    msg = str(ei.value)
+    assert "LEAKY-CONTEXT-TOKEN" not in msg  # raw value must not leak
+    assert "evt-sensitive" in msg  # but the entry id (safe) locates it
+    assert "start" in msg
