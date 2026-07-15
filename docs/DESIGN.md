@@ -334,7 +334,14 @@ CREATE TABLE sync_state (
 
 - `cairn sync [karakeep|zotero|obsidian|conversations|all]`
 - `cairn review weekly [--week 2099-W01]`（テスト用の週指定は旧仕様踏襲）
-- `cairn index rebuild`（派生データ全再構築。原本から常に復元可能であることの担保）
+- `cairn index rebuild`（派生データの**欠損補完**。現行 chunking/embedding
+  バージョンに未達の message/item を chunk し、未生成の embedding のみ埋め、
+  FTS・vec0・item_links を再構築する。既存 chunk を強制全 rechunk すると
+  embeddings が CASCADE 全削除され再埋め込みに数時間かかるため、既定は
+  「欠損補完」であり全再生成ではない。原本からの**真の全再構築**（破損した
+  chunk/embedding の作り直し）は `python -m app.admin rechunk --all` +
+  `reindex --all` + `rebuild-vector-index` で行う。派生データは常に原本から
+  再構築可能であること自体は保たれる）
 - 既存の管理 CLI `python -m app.admin`（redact / backup / integrity-check / import-runs 等）は**温存**し、M0〜M5 では触れない。二重 CLI の解消（`cairn admin ...` への吸収）は M6 で検討する。それまで新 `cairn` CLI は sync / review / index のみを担う。
 - launchd: `ops/launchd/*.plist.template`（絶対パスは変数化）。**エージェントは2本に集約**:
   - `com.masato.cairn.sync` — 1時間ごと `cairn sync all`

@@ -227,7 +227,7 @@ def review_weekly(
 
 @index_app.command("rebuild")
 def index_rebuild() -> None:
-    """Rebuild derived data from the originals (M2, DESIGN.md §5.7).
+    """Gap-fill derived data from the originals (M2, DESIGN.md §5.7).
 
     Fills gaps rather than nuking: rechunk skips messages/items already at
     the current chunking version (so existing embeddings survive — a forced
@@ -235,6 +235,11 @@ def index_rebuild() -> None:
     re-embedding), then re-embeds only missing chunks, rebuilds both FTS
     indexes, the vec0 mirror, and item_links. Embedding is skipped with a
     note when no provider/model is available.
+
+    This is deliberately NOT a full regeneration (DESIGN.md §5.7): to rebuild
+    corrupted chunks/embeddings from the originals, use
+    `python -m app.admin rechunk --all` + `reindex --all` +
+    `rebuild-vector-index`.
     """
     from . import db
 
