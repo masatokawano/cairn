@@ -1,7 +1,7 @@
 # Cairn 統合設計書 — Personal External Brain Platform
 
 - 作成日: 2026-07-02
-- 改訂: **v1.1**（2026-07-02）— リポジトリ実態（Phase 3 実装済み・schema v10）との整合、移行経路の明示（D2 注記・D11・§4・§5.4・§5.7・§7・§9）。差分は末尾「改訂記録」参照
+- 改訂: **v1.4**（2026-07-15）— 最新。全改訂履歴は末尾「§11 改訂記録」を正とする（初版 v1.1 は 2026-07-02、Phase 3 実装済み・schema v10 当時のリポジトリ実態との整合）
 - ステータス: **確定**（変更する場合は本文書の Decision Record を更新してから実装すること）
 - 対象: Cairn リポジトリを、brain-sync（統合層）を取り込んだ「外部脳プラットフォーム」へ再編する
 - 読者: Claude Code / Codex CLI（実装者）および将来の自分
@@ -194,7 +194,7 @@ ops/launchd/       # 新規: plist テンプレート
 
 ## 4. データモデル
 
-既存テーブル（conversations, messages, chunks, embeddings、および凍結中の extraction 系）は温存。以下を追加する。migration は既存の枠組み（`_SCHEMA_VERSION` 逐次適用・実行前 `*.premigrate-*` 自動バックアップ。現行 v10）に従い、次版以降として追加する。
+既存テーブル（conversations, messages, chunks, embeddings、および凍結中の extraction 系）は温存。以下を追加する。migration は既存の枠組み（`_SCHEMA_VERSION` 逐次適用・実行前 `*.premigrate-*` 自動バックアップ。現行 v13）に従い、次版以降として追加する。
 
 ```sql
 -- 全ソース横断のレジストリ。検索・関連付け・再浮上はすべて items 起点。
@@ -309,10 +309,12 @@ CREATE TABLE sync_state (
 
 ### 5.5 deliver/obsidian_writer.py
 
-- 書き込み許可先は次の3箇所**のみ**をコードレベルで強制（allowlist、パス検証でトラバーサル拒否）:
+- 書き込み許可先は次の4箇所**のみ**をコードレベルで強制（allowlist、パス検証でトラバーサル拒否）:
   - `External Brain/90 Auto/`（上書き可）
   - `External Brain/40 Reviews/Weekly/`（新規のみ）
   - `External Brain/00 Inbox/AI Drafts/`（新規のみ）
+  - `External Brain/90 Auto/Health/`（上書き可。H5/ADR-0005 で追加。健康レポート専用で
+    Vault 同期から既定除外＝PRIVACY.md H5-P1。AGENTS.md 不変条件 2 と一致）
 - `90 Auto` へは旧 brain-sync 相当の一覧（karakeep-to-review.md, cairn-recent.md, zotero-recent.md, obsidian-context.md）を出力。フォーマットは旧仕様を踏襲してよい。
 - 書き込みはテンポラリファイル + アトミック rename（iCloud/Sync との競合でファイル破損を残さない）。
 
@@ -473,6 +475,19 @@ CREATE TABLE sync_state (
 ---
 
 ## 11. 改訂記録
+
+### v1.4（2026-07-15）
+
+ソーシャル取り込みの追加と、設計適合レビュー（docs/review-2026-07-15-design-compliance.md）
+の指摘反映。アーキテクチャは不変。
+
+- ADR-0006（Accepted）: X/Facebook の自作 + 明示的キュレーションのみを公式エクスポート
+  から取り込み。§8 非目標 10 を追加、`items.kind` に `social_post`（schema **v13**、
+  追加のみ migration）、parsers に `x_archive`/`facebook_dyi`。
+- §5.5 Obsidian allowlist を実態どおり4箇所に明記（`90 Auto/Health` を追記。D13/ADR-0005/
+  AGENTS 不変条件 2 と一致）。
+- §5.7 `cairn index rebuild` を「派生データの欠損補完」と明文化（真の全再構築は admin 経路）。
+- 版数・schema 現行版（v13）・完了状態の表記を実態へ追従（旧「現行 v10」等の修正）。
 
 ### v1.3（2026-07-11）
 
