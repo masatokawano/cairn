@@ -18,6 +18,19 @@ from . import LLMProvider, ValidationError
 _DEFAULT_HOST = "http://127.0.0.1:11434"
 _DEFAULT_MODEL = "qwen2.5:32b-instruct-q4_K_M"
 
+# D10: interactive drafts / synthesis (weekly review, MCP context pack, Health
+# AI interpretation) default to the 14b chat model — 32b is opt-in via
+# CAIRN_OLLAMA_MODEL. This is the single source of truth for that default so
+# every draft path shares one contract (bare OllamaProvider()'s _DEFAULT_MODEL
+# above stays 32b; it is the generic extraction default, not the draft one).
+CHAT_DEFAULT_MODEL = "qwen2.5:14b-instruct-q4_K_M"
+
+
+def resolve_chat_model(override: str | None = None) -> str:
+    """Resolve the draft/synthesis model: explicit override → CAIRN_OLLAMA_MODEL
+    → 14b default (D10)."""
+    return override or os.environ.get("CAIRN_OLLAMA_MODEL") or CHAT_DEFAULT_MODEL
+
 
 class OllamaProvider(LLMProvider):
     def __init__(self, model: str = _DEFAULT_MODEL) -> None:

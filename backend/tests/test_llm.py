@@ -284,3 +284,34 @@ def test_extraction_runs_filter_by_kind(extdb):
     segs = extdb.list_extraction_runs(kind="segment")
     assert len(segs) == 1
     assert segs[0]["kind"] == "segment"
+
+
+# ---------------------------------------------------------------------------
+# D10 draft-model resolution (R3, 2026-07-15 design-compliance review)
+# ---------------------------------------------------------------------------
+
+def test_resolve_chat_model_defaults_to_14b(monkeypatch):
+    """The shared draft/synthesis default is the 14b model (D10), used by
+    weekly review, MCP context pack, and Health AI interpretation alike."""
+    from app.llm import ollama
+    monkeypatch.delenv("CAIRN_OLLAMA_MODEL", raising=False)
+    assert ollama.resolve_chat_model() == ollama.CHAT_DEFAULT_MODEL == "qwen2.5:14b-instruct-q4_K_M"
+
+
+def test_resolve_chat_model_env_override(monkeypatch):
+    from app.llm import ollama
+    monkeypatch.setenv("CAIRN_OLLAMA_MODEL", "qwen2.5:32b-instruct-q4_K_M")
+    assert ollama.resolve_chat_model() == "qwen2.5:32b-instruct-q4_K_M"
+    # explicit arg beats the env var
+    assert ollama.resolve_chat_model("custom:latest") == "custom:latest"
+
+
+def test_draft_paths_share_the_14b_default(monkeypatch):
+    """weekly review and MCP context pack resolve to the same D10 default as
+    resolve_chat_model — one contract, not three divergent constants."""
+    monkeypatch.delenv("CAIRN_OLLAMA_MODEL", raising=False)
+    from app.deliver import weekly_review
+    from app.mcp import pack
+    from app.llm import ollama
+    assert weekly_review.DEFAULT_MODEL == ollama.CHAT_DEFAULT_MODEL
+    assert pack.DEFAULT_MODEL == ollama.CHAT_DEFAULT_MODEL

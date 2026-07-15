@@ -32,7 +32,8 @@ from .. import db, recall
 from . import MAX_SNIPPET, MAX_TITLE, _clip, _fence
 
 PROMPT_VERSION = "prompt_v1"
-DEFAULT_MODEL = "qwen2.5:14b-instruct-q4_K_M"  # D10 default (weekly と同じ)
+# D10 draft default — shared with weekly review / Health via llm/ollama.py.
+from ..llm.ollama import CHAT_DEFAULT_MODEL as DEFAULT_MODEL  # noqa: E402
 
 PACK_BUCKET_K = 6          # items per bucket before budget scaling
 _VISION_KINDS = ("conversation", "note")

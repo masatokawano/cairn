@@ -327,8 +327,10 @@ def ai_draft(conn, *, metrics: list[str], since: str | None = None,
     safety gate passes; the caller decides acceptance later.
     """
     if llm is None:
-        from ..llm.ollama import OllamaProvider  # local by default (D10)
-        llm = OllamaProvider()
+        # D10: local ollama, 14b draft default (32b via CAIRN_OLLAMA_MODEL) —
+        # same contract as weekly review / MCP context pack.
+        from ..llm.ollama import OllamaProvider, resolve_chat_model
+        llm = OllamaProvider(model=resolve_chat_model())
 
     snap = create_snapshot(conn, metrics=metrics, since=since, until=until,
                            max_rows=max_rows)
