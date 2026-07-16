@@ -73,7 +73,12 @@ def test_wrapper_stripping_and_post_fields(tmp_path):
     by_id = {p["external_id"]: p for p in result.posts}
 
     post = by_id["x:111"]
-    assert post["url"] == "https://x.com/i/status/111"
+    # url feeds items.url_norm (the only thing rebuild_item_links() reads),
+    # so a post with an embedded link uses that link — enabling Karakeep
+    # dedup — not the tweet's own permalink (2026-07-16: found via production
+    # import producing zero X item_links; see test_post_without_link_falls_
+    # back_to_permalink for the no-link case).
+    assert post["url"] == "https://example.com/a"
     assert post["title"] == "Hello world from a synthetic post"
     assert post["meta"]["text"] == "Hello world from a synthetic post"
     assert post["meta"]["social_source"] == "x"
@@ -92,6 +97,14 @@ def test_reply_detection(tmp_path):
     assert reply["meta"]["reply_to_url"] == "https://x.com/i/status/111"
     assert reply["meta"]["links"] == []
     assert result.counts["tweets_seen"] == 2
+
+
+def test_post_without_link_falls_back_to_permalink(tmp_path):
+    """No embedded link (meta["links"] == []) -> url stays the tweet's own
+    permalink, so plain-text posts remain clickable in the UI."""
+    result = parse_x_archive(_write_dir(tmp_path / "arc"))
+    reply = {p["external_id"]: p for p in result.posts}["x:222"]
+    assert reply["url"] == "https://x.com/i/status/222"
 
 
 def test_older_tweet_js_name_supported(tmp_path):

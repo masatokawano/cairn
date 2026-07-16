@@ -161,10 +161,16 @@ def _post_record(tweet: dict, counts: dict) -> dict | None:
         meta["reply_to_url"] = f"https://x.com/i/status/{reply_to}"
 
     iso = _iso_utc(tweet.get("created_at"))
+    # url feeds items.url_norm (db.upsert_items) which is the only thing
+    # rebuild_item_links() reads — meta["links"] alone is invisible to the
+    # linker. Prefer the tweet's first embedded external link so a post
+    # sharing an article dedups against a Karakeep copy of it (matching
+    # facebook_dyi._post_record's external_context.url pattern); fall back
+    # to the tweet's own permalink so plain-text posts stay clickable.
     return {
         "external_id": f"x:{tweet_id}",
         "title": _title(full_text),
-        "url": f"https://x.com/i/status/{tweet_id}",
+        "url": links[0] if links else f"https://x.com/i/status/{tweet_id}",
         "created_at": iso,
         "updated_at": iso,
         "meta": meta,
