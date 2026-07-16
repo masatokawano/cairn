@@ -123,17 +123,26 @@ status doc §5.1 の詳細参照。
 status doc §5.2 参照（pin/mute、会話添付 OCR、Karakeep 本文抜粋拡充、MCP ツール追加、
 外部 embedding provider、週次レビュー書式改訂）。**実装ではなく改訂提案から始めること。**
 
-- **D-social（2026-07-14 批准 + FB 取り込み完了。X は未取り込み）**: X / Facebook の
+- **D-social（2026-07-14 批准。2026-07-16 FB・X とも取り込み完了）**: X / Facebook の
   **自作 + 明示的キュレーションのみ**の取り込み。ADR-0006（Accepted）、§8 非目標 10。
   実装 PR #15（schema v13 / `parsers/x_archive`・`facebook_dyi` / `cairn import x|facebook`）
-  + PR #16（検索スケーリング修正）ともに merge 済み。
+  + PR #16（検索スケーリング修正）+ PR #20（X ブックマーク対象外確定）+ PR #21
+  （item_links 欠落・巨大クリーク化修正）すべて merge 済み。
   - **完了（2026-07-14）**: 本番 `cairn.db` に FB DYI 実データ取り込み済み
     （social_post 46,299 = post 36,467 + comment 9,832、Karakeep と item_links 56 件、
     本人限定・他人コンテンツ混入 0 を実データで検証）。v13 は launchd sync 経由で
     本番適用済み・整合性検証済み。
-  - **残**: ① X アーカイブ未入手 → 入手後に bookmark 有無を確認して ADR Open
-    question 1 を閉じ、`cairn import x` で取り込み。② メディア（写真）は非取り込み
-    のまま（ADR 決定）
+  - **完了（2026-07-16）**: X アーカイブ（7GB、tweets 123,223・likes 82,482）取り込み。
+    X ブックマークは公式アーカイブに dataType 自体が存在せず対象外で確定（ADR Open
+    question 1 解消・実データで検証）。取り込み後の検証で2件のバグを発見・修正:
+    ① `_post_record()` の埋め込みリンクが `items.url` に反映されず item_links から
+    不可視だった（facebook_dyi と同じパターンに修正）。② 上記修正を適用したところ
+    旧 Twitter 時代の自動投稿ボイラープレート（paper.li/Ustream/fllwrs.com 等、同一
+    URL を70〜595件で共有）が `rebuild_item_links()` の総当たりペア生成で組み合わせ
+    爆発（item_links 1,898→504,078、99.5%が X-X 自己リンクのノイズ、`linked_items()`
+    に LIMIT がなく `build_context_pack` へ実害）。`_LINK_GROUP_CAP=30` で修正
+    （同種の欠陥は claude_cli 側にも既存: 修正前で最大594件のfanoutを確認、修正で26件）。
+  - **残**: メディア（写真）は非取り込みのまま（ADR 決定、変更なし）
 
 ## E. 旧 Phase 3 系（凍結・着手禁止）
 
