@@ -126,6 +126,27 @@ def test_a_less_than_b_invariant(db):
         assert a_id < b_id
 
 
+def test_group_above_cap_is_excluded_as_boilerplate(db):
+    """2026-07-16: X import surfaced auto-tweet boilerplate (the same
+    paper.li/Ustream/fllwrs.com link shared by 70-595 posts) — pairing every
+    member is a quadratic blow-up, and each such group is noise (an
+    automated tool, not a meaningful cross-source match). A group above
+    _LINK_GROUP_CAP is skipped entirely rather than partially paired."""
+    for i in range(db._LINK_GROUP_CAP + 1):
+        add_bookmark(db, f"bm-{i}", "https://example.com/boilerplate")
+    assert db.rebuild_item_links()["total"] == 0
+    assert links(db) == []
+
+
+def test_group_at_cap_still_links(db):
+    """Boundary: exactly _LINK_GROUP_CAP members is still a normal group."""
+    n = db._LINK_GROUP_CAP
+    for i in range(n):
+        add_bookmark(db, f"bm-{i}", "https://example.com/popular")
+    result = db.rebuild_item_links()
+    assert result["total"] == n * (n - 1) // 2
+
+
 def test_no_links_for_singleton_keys(db):
     db.upsert_conversations([make_conv("conv-1", "孤立 URL https://example.com/only")])
     add_bookmark(db, "bm-1", "https://example.com/elsewhere")

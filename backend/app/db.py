@@ -1182,6 +1182,14 @@ def prune_items(source: str, *, keep_external_ids: list[str]) -> int:
     return len(stale)
 
 
+# A (via, key) group above this size is treated as boilerplate/noise rather
+# than a meaningful cross-source match (see rebuild_item_links docstring).
+# Organic same-link sharing in this archive tops out in the low 20s; the
+# repeated-auto-tweet groups it excludes start at 70+ — comfortably clear
+# of any plausible organic cluster.
+_LINK_GROUP_CAP = 30
+
+
 def rebuild_item_links() -> dict:
     """Full rebuild of item_links from scratch (M1, DESIGN.md §5.1 D5).
 
@@ -1199,6 +1207,13 @@ def rebuild_item_links() -> dict:
     call; at personal-archive scale (~15k messages) this is a couple of
     seconds. If it ever hurts, per-item key caching would need a schema
     addition (DESIGN.md §4 change) — report, don't build it ad hoc.
+
+    A (via, key) group larger than _LINK_GROUP_CAP is skipped entirely
+    (found 2026-07-16: X import surfaced old auto-tweet boilerplate —
+    paper.li/fllwrs.com/Ustream links repeated 70-595 times — pairing every
+    member is a quadratic blow-up and each such group is noise, not a
+    meaningful cross-source match; linked_items() has no limit clause, so
+    an uncapped group also floods build_context_pack for every member).
     """
     conn = connect()
     key_map: dict[tuple[str, str], set[int]] = {}
@@ -1230,7 +1245,7 @@ def rebuild_item_links() -> dict:
 
     pairs: set[tuple[int, int, str]] = set()
     for (via, _key), ids in key_map.items():
-        if len(ids) < 2:
+        if len(ids) < 2 or len(ids) > _LINK_GROUP_CAP:
             continue
         ordered = sorted(ids)
         for idx, a in enumerate(ordered):
