@@ -25,9 +25,12 @@ retention / deletion（H8）まで。次は実運用（実データで解釈生�
 H9 汎用 validation 評価。
 
 ソーシャル取り込み（正典: `docs/adr/0006-social-activity-ingest.md`、Accepted）は
-**FB 取り込み完了**（2026-07-14）。X / Facebook の自作 + 明示的キュレーションのみを
+**FB・X とも取り込み完了**（2026-07-16）。X / Facebook の自作 + 明示的キュレーションのみを
 公式エクスポートから索引（`items.kind='social_post'`、schema v13）。本番 `cairn.db` に
-FB DYI 実データ取り込み済み。残は X アーカイブ取り込み（未入手）。
+FB DYI（46,299 件）+ X アーカイブ（social_post 123,223・bookmark/いいね 82,482）実データ
+取り込み済み。X ブックマークは公式アーカイブに dataType が存在せず対象外で確定
+（ADR Open question 1 解消）。取り込み後の検証で item_links の欠落・巨大クリーク化を
+発見・修正（PR #21）。M6③ 評価対象に X 実データが加わった。
 
 各マイルストーンの詳細（背景・完了条件・非目標）は DESIGN.md §7 と §8 を参照。
 

@@ -2,7 +2,8 @@
 
 - Status: **Accepted**（2026-07-14 オーナー批准。X ブックマークは Open question 1 の
   条件付き =「公式アーカイブにあれば取り込む、無ければ対象外」のまま批准。
-  2026-07-15 実 export 検証によりブックマークは対象外で確定 — 下記 Open questions 参照）
+  2026-07-15 実 export 検証によりブックマークは対象外で確定 — 下記 Open questions 参照。
+  2026-07-16 実装完了: FB・X とも本番取り込み済み — 下記「既知の制約」参照）
 - Date: 2026-07-14
 - Decision owner: Repository owner
 - Related documents:
@@ -179,7 +180,23 @@ MCP／LLM へ渡す際は既存の `CAIRN_ARCHIVE_DATA` フェンスを必ず適
   2026-07-15 の実 export 検証により対象外確定 — 公式アーカイブに含まれない）。
 - フィード・DM・他人のコメントが 1 件も入っていないことをテストで強制。
 - 同一エクスポートの再取り込みで行数不変（差分インポート冪等）。
-- 同一 URL の Karakeep bookmark と X の自作投稿/いいねが `item_links` でリンクする
-  （実データ: FB は 56 件、X は取り込み後に確認）。
+- 同一 URL の Karakeep bookmark と X/Facebook の自作投稿が `item_links` でリンクする
+  （実データ: FB は 56 件。X は投稿の埋め込みリンクが `items.url` に反映されておらず
+  item_links から不可視だったバグを2026-07-16に発見・修正 — PR #21。修正後は
+  X↔他ソース 2,702 件、うち Karakeep 3 件・Facebook 2,620 件・chatgpt 55 件等）。
+  **いいねは対象外**（下記「既知の制約」参照）。
 - MCP でソーシャル本文がフェンス済みで返る。
 - 実データはリポジトリ・テストに入れない（テストは合成アーカイブのみ）。
+
+## 既知の制約（2026-07-16、実データ検証で判明）
+
+**X いいねは Karakeep 等との `item_links` dedup ができない**（設計上の恒久的制約、
+バグではない）。実アーカイブの `like.js` エントリは `{tweetId, fullText,
+expandedUrl}` の3フィールドのみで、`expandedUrl` は常に
+`https://twitter.com/i/web/status/{tweetId}`（いいねしたツイート自身の別形式
+permalink）であり、そのツイートが指す外部記事の URL ではない。実際の外部リンクは
+`fullText` 内に t.co 短縮 URL として存在するのみで、展開には t.co への都度ライブ
+HTTP アクセスが必要 — これは決定 1「取得は公式エクスポートのみ・ライブ API は
+不採用」に反するため実装しない。よっていいねは本文込みで索引・検索可能だが、
+Karakeep 等との自動 dedup 対象からは恒久的に外れる。X の自作投稿（`entities.urls`
+に展開済み URL を持つ）はこの制約を受けない。
