@@ -89,9 +89,9 @@
 | A1 | `admin backup --with-blobs` — `data/attachments/` を colocate | XS | — | blob store 後は backup が不完全 |
 | A2 | `import_runs.failed` の正しい計上 — parse 例外が warning 扱いで failed=0 | XS | — | メトリクス精度 |
 | A3 | per-parser PARSER_VERSION — 現状 suite 単位 | S | — | 部分再 ingest が可能になる |
-| A4 | bearer token 認証 — SECURITY 残課題 | S/M | — | ローカル運用では不要のまま |
+| A4 | bearer token 認証 — SECURITY 残課題。**見送り（2026-07-17 オーナー決定）**: ローカル運用では不要のまま。共有利用が要件化したら SECURITY.md 残課題（§残課題）として再提案 | S/M | — | 見送り |
 | A5 | API/UI 経由の export — 現状 admin CLI のみ | S | — | UX 向上 |
-| A6 | httpx deprecation warning 解消 | XS | — | テスト出力の警告を消す |
+| A6 | ✅ 完了（2026-07-17）: `backend/pytest.ini` の filterwarnings（message 一致）で抑制。httpx2 依存追加は不採用 — 次の意図的な starlette 更新時に再検討 | XS | — | 済 |
 | A7 | `temp/`（547MB）・premigrate/backup 累積・旧 Vault 複製・旧 brain-sync 実体の削除 | XS | **全て不可逆＝個別承認** | disk と平文残存の解消（status doc R7 の表） |
 | A8 | backup ローテーション — N 個保持 + 自動削除 | XS | — | A7 とセット |
 
