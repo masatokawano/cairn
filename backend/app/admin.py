@@ -46,7 +46,7 @@ Usage:
   .venv/bin/python -m app.admin force-resync
   .venv/bin/python -m app.admin import-runs [--limit N] [--source S]
   .venv/bin/python -m app.admin integrity-check
-  .venv/bin/python -m app.admin backup [--out PATH]
+  .venv/bin/python -m app.admin backup [--out PATH] [--with-blobs]
   .venv/bin/python -m app.admin export-jsonl [--out PATH] [--source S]
                                              [--after ISO] [--before ISO]
                                              [--conversation-id N]
@@ -229,8 +229,12 @@ def cmd_backup(args) -> int:
     if not os.path.exists(db_path):
         print(f"DB not found: {db_path}", file=sys.stderr)
         return 1
-    path = db.backup(args.out)
+    path = db.backup(args.out, with_blobs=args.with_blobs)
     print(f"backup: {path}")
+    blobs_dir = path + ".attachments"
+    if args.with_blobs and os.path.isdir(blobs_dir):
+        n = sum(len(files) for _, _, files in os.walk(blobs_dir))
+        print(f"attachments: {blobs_dir} ({n} blobs)")
     print("note: the backup contains plaintext conversation data (0600). "
           "Restore by copying it back or setting CAIRN_DB to it.")
     return 0
@@ -444,6 +448,8 @@ def main(argv=None) -> int:
     sub.add_parser("integrity-check").set_defaults(func=cmd_integrity_check)
     p_backup = sub.add_parser("backup")
     p_backup.add_argument("--out", default=None, help="destination path (default: <db>.backup-<timestamp>)")
+    p_backup.add_argument("--with-blobs", action="store_true", dest="with_blobs",
+                          help="also copy data/attachments/ to <out>.attachments (A1)")
     p_backup.set_defaults(func=cmd_backup)
     def _add_export_filters(sp):
         sp.add_argument("--out", default=None, help="destination path (default: stdout)")

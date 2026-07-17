@@ -86,7 +86,7 @@
 | # | 候補 | 規模 | 依存 | 価値 |
 |---|---|---|---|---|
 | A0 | ✅ 完了（2026-07-12）: Gemini Takeout +6 会話、Claude export +14/更新177、ChatGPT は 6/26 版取り込み済みを確認（1,226 全 skip）。Obsidian 3 ノートは launchd 同期済み。`index rebuild` 実行。S5 の 4 系統すべてに実データあり | XS | — | 済 |
-| A1 | `admin backup --with-blobs` — `data/attachments/` を colocate | XS | — | blob store 後は backup が不完全 |
+| A1 | ✅ 完了（2026-07-17）: `backup --with-blobs` で `<backup>.attachments/` に兄弟複製（DB とペアで移動・復元） | XS | — | 済 |
 | A2 | ✅ 完了（2026-07-17）: failed = パースできなかった入力単位の数（全体例外=1、失敗シャード数）。寛容な per-entry skip は warnings のまま（回帰テストで固定） | XS | — | 済 |
 | A3 | per-parser PARSER_VERSION — 現状 suite 単位 | S | — | 部分再 ingest が可能になる |
 | A4 | bearer token 認証 — SECURITY 残課題。**見送り（2026-07-17 オーナー決定）**: ローカル運用では不要のまま。共有利用が要件化したら SECURITY.md 残課題（§残課題）として再提案 | S/M | — | 見送り |

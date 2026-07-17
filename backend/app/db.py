@@ -2982,13 +2982,22 @@ def export_markdown(
     return n
 
 
-def backup(out_path: str | None = None) -> str:
+def backup(out_path: str | None = None, *, with_blobs: bool = False) -> str:
     """Create a consistent single-file copy of the DB and return its path.
 
     Checkpoints the WAL first so the copied main file is self-contained.
-    Default destination is `<db>.backup-<timestamp>`. The copy contains
-    plaintext conversation data, so it is locked down to 0600. Restore by
-    copying the file back or pointing CAIRN_DB at it.
+    Default destination is `<db>.backup-<timestamp>` (microsecond precision —
+    two backups in the same second must not overwrite each other, and the
+    `.attachments` sibling below would collide on copytree).
+    The copy contains plaintext conversation data, so it is locked down to
+    0600. Restore by copying the file back or pointing CAIRN_DB at it.
+
+    with_blobs (backlog A1): also copy the attachments blob store to the
+    sibling directory `<out>.attachments/` so DB + blobs travel as a pair —
+    exactly the colocate case attachments.root_dir() anticipates. Blobs are
+    content-addressed (sha256 filenames), so a plain copytree is consistent
+    even while ingest is running. A missing store is not an error: the DB
+    copy alone is still a valid backup.
     """
     conn = connect()
     db_path = os.path.abspath(DB_PATH)
@@ -2997,7 +3006,7 @@ def backup(out_path: str | None = None) -> str:
     except sqlite3.Error:
         pass  # best-effort; copy proceeds regardless
     if out_path is None:
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         out_path = f"{db_path}.backup-{stamp}"
     out_path = os.path.abspath(out_path)
     shutil.copy2(db_path, out_path)
@@ -3005,6 +3014,16 @@ def backup(out_path: str | None = None) -> str:
         os.chmod(out_path, 0o600)
     except OSError:
         pass
+    if with_blobs:
+        from . import attachments as _store
+        src = _store.root_dir()
+        if os.path.isdir(src):
+            dest = out_path + ".attachments"
+            shutil.copytree(src, dest, dirs_exist_ok=False)
+            try:
+                os.chmod(dest, 0o700)
+            except OSError:
+                pass
     return out_path
 
 

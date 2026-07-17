@@ -75,3 +75,48 @@ def test_admin_backup_command(db, tmp_path, capsys):
     assert rc == 0
     assert os.path.exists(out)
     assert "backup:" in capsys.readouterr().out
+
+
+# --- A1: --with-blobs ----------------------------------------------------------
+
+
+def test_backup_with_blobs_copies_attachment_tree(db, tmp_path):
+    from app import attachments
+    h = attachments.store(b"synthetic blob bytes")
+    db.upsert_conversations([make_conv(db)])
+
+    out = db.backup(str(tmp_path / "snap.db"), with_blobs=True)
+    dest = out + ".attachments"
+    copied = os.path.join(dest, h[:2], h)
+    assert os.path.isfile(copied)
+    with open(copied, "rb") as f:
+        assert f.read() == b"synthetic blob bytes"
+    assert oct(os.stat(dest).st_mode & 0o777) == "0o700"
+
+
+def test_backup_with_blobs_missing_store_is_noop(db, tmp_path):
+    db.upsert_conversations([make_conv(db)])
+    out = db.backup(str(tmp_path / "snap.db"), with_blobs=True)
+    assert os.path.exists(out)
+    assert not os.path.exists(out + ".attachments")
+
+
+def test_admin_backup_with_blobs_flag(db, tmp_path, capsys):
+    from app import admin, attachments
+    importlib.reload(admin)
+    attachments.store(b"cli blob")
+    db.upsert_conversations([make_conv(db)])
+    out = str(tmp_path / "cli-snap.db")
+    rc = admin.main(["backup", "--out", out, "--with-blobs"])
+    assert rc == 0
+    assert os.path.isdir(out + ".attachments")
+    stdout = capsys.readouterr().out
+    assert "attachments:" in stdout and "(1 blobs)" in stdout
+
+
+def test_backup_default_names_unique_within_second(db):
+    db.upsert_conversations([make_conv(db)])
+    first = db.backup()
+    second = db.backup()
+    assert first != second
+    assert os.path.exists(first) and os.path.exists(second)
