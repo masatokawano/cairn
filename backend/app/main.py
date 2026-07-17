@@ -168,6 +168,23 @@ def sync_now():
 _SEARCH_KINDS = {"conversation", "bookmark", "reference", "note", "social_post"}
 
 
+def _parse_kinds(kinds: str | None) -> list[str] | None:
+    """Comma-separated kinds param → validated list (shared by /api/search
+    and /api/items so both endpoints accept exactly the same vocabulary)."""
+    if not kinds:
+        return None
+    kind_list = [k.strip() for k in kinds.split(",") if k.strip()]
+    bad = sorted(set(kind_list) - _SEARCH_KINDS)
+    if bad:
+        # explicit 422 rather than a silent empty result, mirroring the
+        # mode pattern check — typos should fail loud
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown kinds {bad}; valid: {sorted(_SEARCH_KINDS)}",
+        )
+    return kind_list or None
+
+
 @app.get("/api/search")
 def search(
     q: str = Query(..., min_length=1),
@@ -182,17 +199,7 @@ def search(
     after: str | None = None,
     before: str | None = None,
 ):
-    kind_list: list[str] | None = None
-    if kinds:
-        kind_list = [k.strip() for k in kinds.split(",") if k.strip()]
-        bad = sorted(set(kind_list) - _SEARCH_KINDS)
-        if bad:
-            # explicit 422 rather than a silent empty result, mirroring the
-            # mode pattern check — typos should fail loud
-            raise HTTPException(
-                status_code=422,
-                detail=f"unknown kinds {bad}; valid: {sorted(_SEARCH_KINDS)}",
-            )
+    kind_list = _parse_kinds(kinds)
     try:
         results = db.search(
             q, mode=mode, source=source, kinds=kind_list, limit=limit,
@@ -218,6 +225,34 @@ def conversation(conv_id: int):
     if conv is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     return conv
+
+
+@app.get("/api/items")
+def items(
+    source: str | None = None,
+    kinds: str | None = Query(
+        None,
+        description="comma-separated items.kind filter, e.g. 'conversation,bookmark'",
+    ),
+    limit: int = Query(100, le=500),
+    offset: int = 0,
+    after: str | None = None,
+    before: str | None = None,
+):
+    return {
+        "results": db.list_items(
+            source=source, kinds=_parse_kinds(kinds), limit=limit,
+            offset=offset, after=after, before=before,
+        )
+    }
+
+
+@app.get("/api/items/{item_id}")
+def item_detail(item_id: int):
+    it = db.get_item_by_id(item_id)
+    if it is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    return it
 
 
 @app.get("/api/stats")
