@@ -175,6 +175,30 @@ button:disabled {
   color: #5a4a1f;
 }
 
+/* recent-activity list: kind label on non-conversation rows */
+.kind-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #eee9df;
+  color: #6a5b3a;
+  white-space: nowrap;
+}
+
+/* item detail modal: link out to the original page */
+.item-link-row {
+  padding: 8px 20px 0;
+}
+
+.item-link-btn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
 .search-box {
   width: 100%;
   font: inherit;

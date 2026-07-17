@@ -24,13 +24,36 @@ type SearchHit = {
   semantic_score: number | null
 }
 
-type ConvSummary = {
-  id: number
+// One row of the empty-query recent-activity list (GET /api/items):
+// conversations and external items merged, shaped like search hits.
+type ActivityItem = {
+  conversation_id: number | null
+  item_id: number | null // null only for legacy conversations missing their items mirror
+  kind: ItemKind
   source: string
-  title: string
+  title: string | null
+  url: string | null
+  external_id: string
+  created_at: string | null
   updated_at: string | null
-  message_count: number
-  meta: { cwd?: string }
+  meta: { cwd?: string; text?: string; description?: string }
+  message_count: number | null
+}
+
+// GET /api/items/{id} — single item with assembled body text.
+type ItemDetail = {
+  item_id: number
+  kind: ItemKind
+  source: string
+  external_id: string
+  title: string | null
+  url: string | null
+  doi: string | null
+  created_at: string | null
+  updated_at: string | null
+  meta: Record<string, unknown>
+  conversation_id: number | null
+  body: string | null
 }
 
 type Message = { id: number; idx: number; role: string; text: string; created_at: string | null }
@@ -118,6 +141,8 @@ const KINDS: { key: ItemKind; label: string }[] = [
 
 const sourceLabel = (key: string) => SOURCES.find((s) => s.key === key)?.label ?? key
 
+const kindLabel = (key: ItemKind) => KINDS.find((k) => k.key === key)?.label ?? key
+
 /** fetch wrapper: parses JSON and turns HTTP errors into Error(detail). */
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response
@@ -191,8 +216,9 @@ export default function App() {
   const [after, setAfter] = useState('')
   const [before, setBefore] = useState('')
   const [hits, setHits] = useState<SearchHit[] | null>(null)
-  const [recent, setRecent] = useState<ConvSummary[]>([])
+  const [recent, setRecent] = useState<ActivityItem[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
+  const [selectedItem, setSelectedItem] = useState<ItemDetail | null>(null)
   const [stats, setStats] = useState<SourceStat[]>([])
   const [itemStats, setItemStats] = useState<ItemStat[]>([])
   const [busy, setBusy] = useState(false)
@@ -220,24 +246,28 @@ export default function App() {
       .catch((e: Error) => setNotice(e.message))
   }, [])
 
-  const loadRecent = useCallback((src: string | null) => {
+  const loadRecent = useCallback((src: string | null, k: ItemKind | null, a: string, b: string) => {
     const p = new URLSearchParams({ limit: '50' })
     if (src) p.set('source', src)
-    api<{ results: ConvSummary[] }>(`/api/conversations?${p}`)
+    if (k) p.set('kinds', k)
+    if (a) p.set('after', a)
+    // end-of-day padding, same convention as runSearch below
+    if (b) p.set('before', `${b}T23:59:59Z`)
+    api<{ results: ActivityItem[] }>(`/api/items?${p}`)
       .then((d) => setRecent(d.results))
       .catch((e: Error) => setNotice(e.message))
   }, [])
 
   useEffect(() => {
     refreshStats()
-    loadRecent(null)
+    loadRecent(null, null, '', '')
   }, [refreshStats, loadRecent])
 
   const runSearch = useCallback(
     (q: string, src: string | null, k: ItemKind | null, m: SearchMode, a: string, b: string) => {
       if (!q.trim()) {
         setHits(null)
-        loadRecent(src)
+        loadRecent(src, k, a, b)
         return
       }
       const p = new URLSearchParams({ q, mode: m })
@@ -276,6 +306,15 @@ export default function App() {
     api<Conversation>(`/api/conversations/${id}`)
       .then(setSelected)
       .catch((e: Error) => setNotice(`会話の取得に失敗しました: ${e.message}`))
+  }
+
+  const openItem = (id: number) => {
+    api<ItemDetail>(`/api/items/${id}`)
+      .then((d) => {
+        if (d.kind === 'conversation' && d.conversation_id !== null) openConversation(d.conversation_id)
+        else setSelectedItem(d)
+      })
+      .catch((e: Error) => setNotice(`アイテムの取得に失敗しました: ${e.message}`))
   }
 
   const loadExtractions = (convId: number) => {
@@ -541,13 +580,9 @@ export default function App() {
                   className="result"
                   onClick={() => {
                     // conversations open in-app; external items open the
-                    // original page (read-only: Cairn holds only the index).
-                    // scheme guard duplicates the backend's _safe_external_url
-                    // — defense in depth for an untrusted, external-origin URL
+                    // detail modal (the original-page link lives there)
                     if (h.conversation_id !== null) openConversation(h.conversation_id)
-                    else if (h.url && /^https?:\/\//i.test(h.url)) {
-                      window.open(h.url, '_blank', 'noopener,noreferrer')
-                    }
+                    else openItem(h.item_id)
                   }}
                 >
                   <div className="result-head">
@@ -597,21 +632,46 @@ export default function App() {
             )
           ) : recent.length === 0 ? (
             <p className="empty">
-              まだ会話がありません。エクスポートファイルをこのウィンドウにドロップするか、CLIログ同期を実行してください。
+              {source || kind || after || before
+                ? '条件に一致するアイテムがありません。'
+                : 'まだデータがありません。エクスポートファイルをこのウィンドウにドロップするか、CLIログ同期を実行してください。'}
             </p>
           ) : (
             <>
-              <p className="section-label">最近の会話</p>
-              {recent.map((c) => (
-                <div key={c.id} className="result" onClick={() => openConversation(c.id)}>
+              <p className="section-label">最近のアクティビティ</p>
+              {recent.map((r) => (
+                <div
+                  key={`${r.source}:${r.external_id}`}
+                  className="result"
+                  onClick={() => {
+                    if (r.conversation_id !== null) openConversation(r.conversation_id)
+                    else if (r.item_id !== null) openItem(r.item_id)
+                  }}
+                >
                   <div className="result-head">
-                    <span className={`badge badge-${c.source}`}>{sourceLabel(c.source)}</span>
-                    <span className="result-title">{c.title}</span>
-                    <span className="result-date">{fmtDate(c.updated_at)}</span>
+                    <span className={`badge badge-${r.source}`}>{sourceLabel(r.source)}</span>
+                    {r.kind !== 'conversation' && <span className="kind-chip">{kindLabel(r.kind)}</span>}
+                    <span className="result-title">
+                      {r.title ?? '(無題)'}
+                      {r.conversation_id === null && r.url && (
+                        <span className="ext-mark" title={r.url}>
+                          {' '}↗
+                        </span>
+                      )}
+                    </span>
+                    <span className="result-date">{fmtDate(r.updated_at ?? r.created_at)}</span>
                   </div>
-                  <div className="result-snippet muted">
-                    {c.message_count} メッセージ {c.meta.cwd ? `· ${c.meta.cwd}` : ''}
-                  </div>
+                  {r.kind === 'conversation' ? (
+                    <div className="result-snippet muted">
+                      {r.message_count} メッセージ {r.meta.cwd ? `· ${r.meta.cwd}` : ''}
+                    </div>
+                  ) : (
+                    (r.meta.text || r.meta.description) && (
+                      <div className="result-snippet muted">
+                        {(r.meta.text ?? r.meta.description ?? '').slice(0, 120)}
+                      </div>
+                    )
+                  )}
                 </div>
               ))}
             </>
@@ -837,6 +897,45 @@ export default function App() {
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {selectedItem && (
+        <div className="overlay" onClick={() => setSelectedItem(null)}>
+          <div className="thread" onClick={(e) => e.stopPropagation()}>
+            <div className="thread-head">
+              <span className={`badge badge-${selectedItem.source}`}>{sourceLabel(selectedItem.source)}</span>
+              <h2>{selectedItem.title ?? '(無題)'}</h2>
+              <button className="close" onClick={() => setSelectedItem(null)}>
+                ✕
+              </button>
+            </div>
+            <div className="thread-meta">
+              {kindLabel(selectedItem.kind)}
+              {(selectedItem.updated_at ?? selectedItem.created_at) &&
+                ` · ${fmtDate(selectedItem.updated_at ?? selectedItem.created_at)}`}
+              {selectedItem.doi ? ` · DOI: ${selectedItem.doi}` : ''}
+            </div>
+            {selectedItem.url && /^https?:\/\//i.test(selectedItem.url) && (
+              <div className="item-link-row">
+                {/* scheme guard duplicates the backend's _safe_external_url —
+                    defense in depth for an untrusted, external-origin URL */}
+                <button
+                  className="item-link-btn"
+                  onClick={() => window.open(selectedItem.url!, '_blank', 'noopener,noreferrer')}
+                >
+                  元ページを開く ↗
+                </button>
+              </div>
+            )}
+            <div className="messages">
+              {selectedItem.body ? (
+                <pre className="msg-text">{selectedItem.body}</pre>
+              ) : (
+                <p className="empty">本文はありません。</p>
+              )}
+            </div>
           </div>
         </div>
       )}
