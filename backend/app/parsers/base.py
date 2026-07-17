@@ -79,6 +79,12 @@ class ParsedConversation:
 class ParseResult:
     conversations: list[ParsedConversation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # パースできなかった入力単位の数 (backlog A2)。1 ファイル upload の全体
+    # 失敗は呼び出し側が failed=1 を記録する; ここは複数シャード zip のように
+    # 「入力の一部が丸ごと読めなかった」場合のみパーサ側で数える。パーサ内の
+    # 寛容な per-entry skip (壊れた行など) は従来どおり warnings であって
+    # failed ではない。
+    failed: int = 0
 
 
 def make_title(text: str, limit: int = 60) -> str:

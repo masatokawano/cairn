@@ -129,6 +129,7 @@ def _scan() -> dict:
                 db.record_import_run(
                     source=src, input_name=path, started_at=started,
                     completed_at=db.utcnow_iso(), status="error", error=str(e),
+                    failed=1,
                 )
                 continue
             stats = db.upsert_conversations(result.conversations)
@@ -137,6 +138,7 @@ def _scan() -> dict:
                 source=src, input_name=path, started_at=started,
                 completed_at=db.utcnow_iso(), parser_version=PARSER_VERSION,
                 inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
+                failed=result.failed,
                 conversations=len(result.conversations), warnings=result.warnings,
                 content_hash=hashlib.sha256(content.encode("utf-8", "replace")).hexdigest(),
                 status="ok",

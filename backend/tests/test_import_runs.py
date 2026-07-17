@@ -58,6 +58,30 @@ def test_upload_unknown_format_records_error_run(client):
     assert runs[0]["status"] == "error"
     assert runs[0]["error"]
     assert runs[0]["inserted"] == 0
+    # A2: 全体が読めなかった upload は failed=1 として計上される
+    assert runs[0]["failed"] == 1
+
+
+def test_upload_counts_failed_shards(client, tmp_path):
+    """A2: 複数シャード zip で一部シャードだけ壊れている場合、run は ok の
+    まま failed に失敗シャード数が載る（正常シャードの取り込みは成立）。"""
+    import io
+    import zipfile as zf_mod
+
+    buf = io.BytesIO()
+    with zf_mod.ZipFile(buf, "w") as z:
+        z.writestr("conversations-000.json", _chatgpt_bytes())
+        z.writestr("conversations-001.json", b"{ this is not valid json")
+    c, db, _ = client
+    resp = c.post("/api/import", files={"file": ("export.zip", buf.getvalue())})
+    assert resp.status_code == 200
+    runs = db.list_import_runs()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run["status"] == "ok"
+    assert run["failed"] == 1
+    assert run["warnings"] >= 1
+    assert run["inserted"] >= 1
 
 
 def test_api_endpoint_lists_runs_newest_first(client):
@@ -97,6 +121,28 @@ def test_cli_sync_records_per_file_runs(client, tmp_path):
     assert runs[0]["input_name"].endswith("sess-1.jsonl")
     assert runs[0]["inserted"] == 1
     assert runs[0]["content_hash"]
+    # A2 の意味漂流ガード: パーサの寛容な per-entry skip を failed に
+    # 再分類しない — 正常ファイルの failed は常に 0。
+    assert runs[0]["failed"] == 0
+
+
+def test_cli_sync_parse_error_records_failed(client, tmp_path, monkeypatch):
+    """A2: ファイル全体の parse 例外は status=error + failed=1 で記録される。"""
+    c, db, cli_sync = client
+    log_dir = tmp_path / "claude" / "-Users-test-proj"
+    log_dir.mkdir(parents=True)
+    (log_dir / "sess-bad.jsonl").write_text('{"whatever": true}')
+
+    def _boom(path, content):
+        raise RuntimeError("synthetic parser crash")
+
+    monkeypatch.setattr(cli_sync.claude_cli, "parse_file", _boom)
+    cli_sync.scan_once()
+    runs = db.list_import_runs(source="claude_cli")
+    assert len(runs) == 1
+    assert runs[0]["status"] == "error"
+    assert runs[0]["failed"] == 1
+    assert runs[0]["inserted"] == 0
 
 
 def test_admin_import_runs_command(client, capsys):

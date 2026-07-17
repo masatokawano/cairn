@@ -251,8 +251,10 @@ cd backend
 ## 取り込み履歴
 
 取り込み（アップロード／CLI同期）は1入力ごとに `import_runs` テーブルへ記録されます
-（source / 入力名 / 日時 / parser version / inserted・updated・skipped 件数 /
-warning 概要 / content hash / 成否）。
+（source / 入力名 / 日時 / parser version / inserted・updated・skipped・failed 件数 /
+warning 概要 / content hash / 成否）。failed はパースできなかった入力単位の数
+（ファイル全体の例外 = 1、複数シャード zip = 失敗シャード数。パーサ内の寛容な
+行 skip は warning のまま）。
 
 - 管理CLI: `python -m app.admin import-runs [--limit N] [--source upload|claude_cli|codex_cli]`
 - API: `GET /api/import-runs?limit=&offset=&source=`

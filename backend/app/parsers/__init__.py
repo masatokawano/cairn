@@ -173,14 +173,17 @@ def _parse_chatgpt_shards(zf: zipfile.ZipFile, shards: list[str]) -> ParseResult
             data = json.loads(_read_bounded(zf, name))
         except FileTooLargeError as exc:
             merged.warnings.append(f"{name}: {exc}")
+            merged.failed += 1
             continue
         except json.JSONDecodeError as exc:
             merged.warnings.append(f"{name}: invalid JSON ({exc})")
+            merged.failed += 1
             continue
         if not chatgpt.looks_like(data):
             merged.warnings.append(
                 f"{name}: ChatGPT 形式と一致しません (shard を skip)"
             )
+            merged.failed += 1
             continue
         r = chatgpt.parse(data, attachments=attachments_map, asset_names=asset_names)
         merged.conversations.extend(r.conversations)
