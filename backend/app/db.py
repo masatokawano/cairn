@@ -2653,6 +2653,99 @@ def list_conversations(
     return [{**dict(r), "meta": json.loads(r["meta"])} for r in rows]
 
 
+def list_items(
+    source: str | None = None,
+    kinds: list[str] | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[dict]:
+    """Recent-activity listing: conversations + external items merged, newest
+    first (the empty-query counterpart of search, so items-only sources like
+    x/karakeep get a browsable list too).
+
+    Two UNION ALL branches. Conversations come from the conversations table
+    (message_count, and rows survive a missing items mirror — legacy DBs can
+    lack it until rechunk self-heals); the items branch excludes
+    kind='conversation' so mirror rows never duplicate them. Ordering and the
+    after/before window both use COALESCE(updated_at, created_at) so the
+    filter matches the date shown; rows with neither date (e.g. X likes)
+    sort last (SQLite DESC puts NULL last) and are excluded once a date
+    filter is set — same behaviour as _keyword_item_rows. Rows are shaped
+    like search hits (conversation-only fields carry None on item rows)."""
+    conn = connect()
+    non_conv_kinds = [k for k in kinds if k != "conversation"] if kinds else None
+    branches: list[str] = []
+    params: list = []
+
+    if kinds is None or "conversation" in kinds:
+        filt = ""
+        if source:
+            filt += " AND c.source = ? "
+            params.append(source)
+        if after:
+            filt += " AND COALESCE(c.updated_at, c.created_at) >= ? "
+            params.append(after)
+        if before:
+            filt += " AND COALESCE(c.updated_at, c.created_at) <= ? "
+            params.append(before)
+        branches.append(f"""
+            SELECT c.id AS conversation_id, i.id AS item_id,
+                   'conversation' AS kind, c.source, c.title, NULL AS url,
+                   c.source_id AS external_id, c.created_at, c.updated_at,
+                   c.meta,
+                   (SELECT COUNT(*) FROM messages m
+                    WHERE m.conversation_id = c.id) AS message_count
+            FROM conversations c
+            LEFT JOIN items i ON i.source = c.source AND i.external_id = c.source_id
+            WHERE 1=1 {filt}
+        """)
+
+    if kinds is None or non_conv_kinds:
+        filt = " AND i.kind != 'conversation' "
+        if non_conv_kinds:
+            filt += f" AND i.kind IN ({','.join('?' * len(non_conv_kinds))}) "
+            params.extend(non_conv_kinds)
+        if source:
+            filt += " AND i.source = ? "
+            params.append(source)
+        if after:
+            filt += " AND COALESCE(i.updated_at, i.created_at) >= ? "
+            params.append(after)
+        if before:
+            filt += " AND COALESCE(i.updated_at, i.created_at) <= ? "
+            params.append(before)
+        branches.append(f"""
+            SELECT NULL AS conversation_id, i.id AS item_id,
+                   i.kind, i.source, i.title, i.url,
+                   i.external_id, i.created_at, i.updated_at,
+                   i.meta,
+                   NULL AS message_count
+            FROM items i
+            WHERE 1=1 {filt}
+        """)
+
+    if not branches:
+        return []
+    rows = conn.execute(
+        f"""
+        SELECT * FROM ({' UNION ALL '.join(branches)})
+        ORDER BY COALESCE(updated_at, created_at) DESC, item_id DESC
+        LIMIT ? OFFSET ?
+        """,
+        [*params, limit, offset],
+    ).fetchall()
+    return [
+        {
+            **dict(r),
+            "url": _safe_external_url(r["url"]),
+            "meta": json.loads(r["meta"] or "{}"),
+        }
+        for r in rows
+    ]
+
+
 def get_item(source: str, external_id: str) -> dict | None:
     """One item from the registry by its (source, external_id) key (M5).
 
@@ -2695,6 +2788,20 @@ def get_item(source: str, external_id: str) -> dict | None:
     else:
         out["body"] = _item_index_text(row["title"], meta)
     return out
+
+
+def get_item_by_id(item_id: int) -> dict | None:
+    """One item by its items.id (HTTP detail endpoint). Thin wrapper that
+    resolves the (source, external_id) key and delegates to get_item() so
+    body assembly, URL gating and conversation_id resolution stay in one
+    place. Returns None if no such item exists."""
+    conn = connect()
+    row = conn.execute(
+        "SELECT source, external_id FROM items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return get_item(row["source"], row["external_id"])
 
 
 def linked_items(item_id: int) -> list[dict]:
