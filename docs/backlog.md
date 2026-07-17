@@ -86,14 +86,14 @@
 | # | 候補 | 規模 | 依存 | 価値 |
 |---|---|---|---|---|
 | A0 | ✅ 完了（2026-07-12）: Gemini Takeout +6 会話、Claude export +14/更新177、ChatGPT は 6/26 版取り込み済みを確認（1,226 全 skip）。Obsidian 3 ノートは launchd 同期済み。`index rebuild` 実行。S5 の 4 系統すべてに実データあり | XS | — | 済 |
-| A1 | `admin backup --with-blobs` — `data/attachments/` を colocate | XS | — | blob store 後は backup が不完全 |
+| A1 | ✅ 完了（2026-07-17）: `backup --with-blobs` で `<backup>.attachments/` に兄弟複製（DB とペアで移動・復元） | XS | — | 済 |
 | A2 | ✅ 完了（2026-07-17）: failed = パースできなかった入力単位の数（全体例外=1、失敗シャード数）。寛容な per-entry skip は warnings のまま（回帰テストで固定） | XS | — | 済 |
 | A3 | per-parser PARSER_VERSION — 現状 suite 単位 | S | — | 部分再 ingest が可能になる |
 | A4 | bearer token 認証 — SECURITY 残課題。**見送り（2026-07-17 オーナー決定）**: ローカル運用では不要のまま。共有利用が要件化したら SECURITY.md 残課題（§残課題）として再提案 | S/M | — | 見送り |
 | A5 | API/UI 経由の export — 現状 admin CLI のみ | S | — | UX 向上 |
 | A6 | ✅ 完了（2026-07-17）: `backend/pytest.ini` の filterwarnings（message 一致）で抑制。httpx2 依存追加は不採用 — 次の意図的な starlette 更新時に再検討 | XS | — | 済 |
 | A7 | `temp/`（547MB）・premigrate/backup 累積・旧 Vault 複製・旧 brain-sync 実体の削除 | XS | **全て不可逆＝個別承認** | disk と平文残存の解消（status doc R7 の表） |
-| A8 | backup ローテーション — N 個保持 + 自動削除 | XS | — | A7 とセット |
+| A8 | ✅ 完了（2026-07-18）: `backup --keep N` — 自動命名バックアップの最新 N 個を残して削除（`.attachments` 兄弟ごと）。`--out` 指定のバックアップは対象外 | XS | — | 済 |
 
 ## B. M6③ のチューニング対象（評価データが揃ってから）
 
