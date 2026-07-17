@@ -125,7 +125,7 @@ async def import_file(file: UploadFile, request: Request):
         db.record_import_run(
             source="upload", input_name=name, started_at=started,
             completed_at=db.utcnow_iso(), content_hash=content_hash,
-            status="error", error=message,
+            status="error", error=message, failed=1,
         )
         return HTTPException(status_code=status_code, detail=message)
 
@@ -143,6 +143,7 @@ async def import_file(file: UploadFile, request: Request):
         source="upload", input_name=name, started_at=started,
         completed_at=db.utcnow_iso(), parser_version=PARSER_VERSION,
         inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
+        failed=result.failed,
         conversations=len(result.conversations), warnings=result.warnings,
         content_hash=content_hash, status="ok",
     )

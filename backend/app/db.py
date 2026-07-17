@@ -102,6 +102,9 @@ CREATE INDEX IF NOT EXISTS idx_attachments_msg ON attachments(message_id);
 -- Import history (P1-B): one row per ingest of a single input (an uploaded
 -- file, or one CLI log file). Records counts, warnings, parser version, and
 -- the input's content hash for auditability.
+-- failed (backlog A2) = パースできなかった入力単位の数: ファイル/upload 全体の
+-- 例外 → 1、複数シャード zip → 失敗シャード数。パーサ内の寛容な per-entry
+-- skip は warnings のままで failed に数えない。
 CREATE TABLE IF NOT EXISTS import_runs (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,          -- "upload" | "claude_cli" | "codex_cli"
