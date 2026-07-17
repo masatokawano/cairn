@@ -93,7 +93,7 @@
 | A5 | API/UI 経由の export — 現状 admin CLI のみ | S | — | UX 向上 |
 | A6 | ✅ 完了（2026-07-17）: `backend/pytest.ini` の filterwarnings（message 一致）で抑制。httpx2 依存追加は不採用 — 次の意図的な starlette 更新時に再検討 | XS | — | 済 |
 | A7 | `temp/`（547MB）・premigrate/backup 累積・旧 Vault 複製・旧 brain-sync 実体の削除 | XS | **全て不可逆＝個別承認** | disk と平文残存の解消（status doc R7 の表） |
-| A8 | backup ローテーション — N 個保持 + 自動削除 | XS | — | A7 とセット |
+| A8 | ✅ 完了（2026-07-18）: `backup --keep N` — 自動命名バックアップの最新 N 個を残して削除（`.attachments` 兄弟ごと）。`--out` 指定のバックアップは対象外 | XS | — | 済 |
 
 ## B. M6③ のチューニング対象（評価データが揃ってから）
 

@@ -250,6 +250,9 @@ cd backend
 `--with-blobs` を付けると `data/attachments/`（添付 blob ストア）も
 `<backup>.attachments/` として横に複製され、DB とペアで移動・復元できます
 （復元時は attachments/ として cairn.db の隣へ戻す）。
+`--keep N` を付けると、バックアップ成功後に自動命名（`<db>.backup-*`）の
+バックアップを最新 N 個だけ残して削除します（`.attachments` 兄弟ごと。
+`--out` で作った任意パスのバックアップは対象外）。
 
 ## 取り込み履歴
 

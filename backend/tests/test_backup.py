@@ -120,3 +120,71 @@ def test_backup_default_names_unique_within_second(db):
     second = db.backup()
     assert first != second
     assert os.path.exists(first) and os.path.exists(second)
+
+
+# --- A8: --keep rotation --------------------------------------------------------
+
+
+def test_prune_keeps_newest_and_removes_blob_siblings(db, tmp_path):
+    from app import attachments
+    attachments.store(b"blob for rotation")
+    db.upsert_conversations([make_conv(db)])
+    backups = [db.backup(with_blobs=True) for _ in range(4)]
+
+    deleted = db.prune_backups(keep=2)
+    assert deleted == backups[:2]
+    for p in backups[:2]:
+        assert not os.path.exists(p)
+        assert not os.path.exists(p + ".attachments")
+    for p in backups[2:]:
+        assert os.path.exists(p)
+        assert os.path.isdir(p + ".attachments")
+
+
+def test_prune_never_touches_explicit_out_backups(db, tmp_path):
+    db.upsert_conversations([make_conv(db)])
+    manual = db.backup(str(tmp_path / "manual-snapshot.db"))
+    auto = [db.backup() for _ in range(3)]
+
+    deleted = db.prune_backups(keep=1)
+    assert deleted == auto[:2]
+    assert os.path.exists(manual)
+    assert os.path.exists(auto[2])
+
+
+def test_prune_noop_when_under_keep(db):
+    db.upsert_conversations([make_conv(db)])
+    auto = [db.backup() for _ in range(2)]
+    assert db.prune_backups(keep=5) == []
+    assert all(os.path.exists(p) for p in auto)
+
+
+def test_prune_rejects_keep_below_one(db):
+    with pytest.raises(ValueError):
+        db.prune_backups(keep=0)
+
+
+def test_admin_backup_keep_flag(db, capsys):
+    from app import admin
+    importlib.reload(admin)
+    db.upsert_conversations([make_conv(db)])
+    old = [db.backup() for _ in range(3)]
+
+    rc = admin.main(["backup", "--keep", "2"])
+    assert rc == 0
+    stdout = capsys.readouterr().out
+    # 3 old + 1 new = 4; keep 2 → the 2 oldest are pruned
+    assert stdout.count("pruned: ") == 2
+    assert not os.path.exists(old[0]) and not os.path.exists(old[1])
+    assert os.path.exists(old[2])
+
+
+def test_admin_backup_keep_zero_rejected(db, capsys):
+    from app import admin
+    importlib.reload(admin)
+    db.upsert_conversations([make_conv(db)])
+    before = len([p for p in os.listdir(os.path.dirname(db.DB_PATH))])
+    rc = admin.main(["backup", "--keep", "0"])
+    assert rc == 2
+    # no backup was made and nothing was deleted
+    assert len([p for p in os.listdir(os.path.dirname(db.DB_PATH))]) == before

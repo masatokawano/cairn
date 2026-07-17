@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import glob
 import hashlib
 import json
 import logging
@@ -3025,6 +3026,33 @@ def backup(out_path: str | None = None, *, with_blobs: bool = False) -> str:
             except OSError:
                 pass
     return out_path
+
+
+def prune_backups(keep: int) -> list[str]:
+    """Delete all but the newest *keep* auto-named backups (backlog A8).
+
+    Only default-pattern siblings `<db>.backup-<stamp>` are candidates —
+    a backup written to an explicit --out path is user-managed and is never
+    touched. The fixed-width timestamp makes lexicographic order
+    chronological, so a plain sort suffices. Each pruned backup's
+    `.attachments` sibling (A1) is removed with it: DB + blobs leave as the
+    pair they arrived as, never one without the other. Returns the deleted
+    backup paths, oldest first."""
+    if keep < 1:
+        raise ValueError("keep must be >= 1")
+    db_path = os.path.abspath(DB_PATH)
+    candidates = sorted(
+        p for p in glob.glob(db_path + ".backup-*")
+        if os.path.isfile(p) and not p.endswith(".attachments")
+    )
+    deleted: list[str] = []
+    for p in candidates[:-keep]:
+        os.remove(p)
+        blobs = p + ".attachments"
+        if os.path.isdir(blobs):
+            shutil.rmtree(blobs)
+        deleted.append(p)
+    return deleted
 
 
 def integrity_check() -> dict:
