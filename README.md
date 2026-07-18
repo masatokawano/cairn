@@ -239,7 +239,7 @@ AWS / GitHub の各キー形式と PEM 秘密鍵ブロック → `[REDACTED:prov
 cd backend
 .venv/bin/python -m app.admin redact-scan    # dry-run: provider別の検出件数を表示
 .venv/bin/python -m app.admin redact-apply   # バックアップ作成→除去→FTS再構築→検証
-.venv/bin/python -m app.admin force-resync   # 全CLIログの強制再取り込み
+.venv/bin/python -m app.admin force-resync   # 全CLIログの強制再取り込み（--source claude_cli|codex_cli で片側のみ）
 .venv/bin/python -m app.admin import-runs    # 取り込み履歴（件数・warning・成否）を表示
 .venv/bin/python -m app.admin integrity-check # DB整合性検査（読み取り専用、問題ありで exit 2）
 .venv/bin/python -m app.admin backup         # DBの一貫したコピーを作成（0600。--with-blobs で添付も）

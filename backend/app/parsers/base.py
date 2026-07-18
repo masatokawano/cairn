@@ -10,12 +10,6 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-# Suite-level parser version, recorded in import_runs so an import's output can
-# be traced to the parser logic that produced it. Bump whenever parser output
-# for the same input could change (per-parser versioning is a future refinement).
-PARSER_VERSION = "1"
-
-
 @dataclass
 class ParsedAttachment:
     """File attached to a message. `hash` is sha256 of the raw decoded bytes
@@ -85,6 +79,11 @@ class ParseResult:
     # 寛容な per-entry skip (壊れた行など) は従来どおり warnings であって
     # failed ではない。
     failed: int = 0
+    # どのパーサが何版で生成したか (backlog A3)。パーサ自身ではなく呼び出し側
+    # (parsers/__init__ の検出レジストリ / cli_sync) がスタンプする。
+    # import_runs.parser_version には "<parser>/<version>" 形式で入る。
+    parser: str | None = None
+    parser_version: str | None = None
 
 
 def make_title(text: str, limit: int = 60) -> str:

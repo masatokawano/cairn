@@ -182,3 +182,86 @@ def test_migration_creates_import_runs_on_pre_v2_db(client, tmp_path):
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='import_runs'"
     ).fetchone()[0] == 1
     assert glob.glob(str(tmp_path / "*.premigrate-v1-to-*"))
+
+
+# --- A3: per-parser PARSER_VERSION -----------------------------------------------
+
+
+def test_upload_parser_version_is_per_parser(client):
+    """upload runs record source='upload', so the detected parser's identity
+    travels in parser_version as '<parser>/<version>'."""
+    c, db, _ = client
+    resp = c.post("/api/import", files={"file": ("conversations.json", _chatgpt_bytes())})
+    assert resp.status_code == 200
+    from app.parsers import chatgpt
+    assert db.list_import_runs()[0]["parser_version"] == f"chatgpt/{chatgpt.PARSER_VERSION}"
+
+
+def test_upload_sharded_zip_parser_version(client, tmp_path):
+    """The shard merge path (_parse_chatgpt_shards) stamps the version too."""
+    import io
+    import zipfile as zf_mod
+    c, db, _ = client
+    buf = io.BytesIO()
+    with zf_mod.ZipFile(buf, "w") as zf:
+        zf.writestr("conversations-000.json", _chatgpt_bytes())
+    resp = c.post("/api/import", files={"file": ("export.zip", buf.getvalue())})
+    assert resp.status_code == 200
+    from app.parsers import chatgpt
+    assert db.list_import_runs()[0]["parser_version"] == f"chatgpt/{chatgpt.PARSER_VERSION}"
+
+
+def test_cli_sync_parser_version_is_per_parser(client, tmp_path):
+    c, db, cli_sync = client
+    log_dir = tmp_path / "claude" / "-Users-test-proj"
+    log_dir.mkdir(parents=True)
+    (log_dir / "sess-1.jsonl").write_text(json.dumps(
+        {"type": "user", "isSidechain": False, "uuid": "u1",
+         "sessionId": "sess-1", "timestamp": "2025-12-11T09:01:00Z",
+         "cwd": "/Users/test/proj",
+         "message": {"role": "user", "content": "テスト質問"}}))
+    cli_sync.scan_once()
+    from app.parsers import claude_cli
+    runs = db.list_import_runs(source="claude_cli")
+    assert runs[0]["parser_version"] == f"claude_cli/{claude_cli.PARSER_VERSION}"
+
+
+def test_all_conversation_parsers_declare_version(client):
+    """Registry stamping requires every conversation parser to carry its own
+    PARSER_VERSION — a new parser must not silently fall back to nothing."""
+    from app.parsers import chatgpt, claude_cli, claude_export, codex_cli, gemini
+    for mod in (chatgpt, claude_export, gemini, claude_cli, codex_cli):
+        v = getattr(mod, "PARSER_VERSION", None)
+        assert isinstance(v, str) and v, mod.__name__
+
+
+def test_force_resync_source_clears_only_that_tree(client, tmp_path, capsys):
+    """Partial re-ingest (A3): --source claude_cli clears only that parser's
+    ingest_files rows; codex state survives."""
+    from app import admin
+    importlib.reload(admin)
+    _, db, cli_sync = client
+    claude_file = os.path.join(cli_sync.CLAUDE_PROJECTS_DIR, "p", "a.jsonl")
+    codex_file = os.path.join(cli_sync.CODEX_SESSIONS_DIR, "q", "b.jsonl")
+    db.record_file_state(claude_file, 1.0, 10)
+    db.record_file_state(codex_file, 2.0, 20)
+
+    rc = admin.main(["force-resync", "--source", "claude_cli"])
+    assert rc == 0
+    remaining = [r["path"] for r in db.connect().execute(
+        "SELECT path FROM ingest_files").fetchall()]
+    assert claude_file not in remaining
+    assert codex_file in remaining
+    assert "claude_cli" in capsys.readouterr().out
+
+
+def test_force_resync_without_source_clears_all(client, capsys):
+    from app import admin
+    importlib.reload(admin)
+    _, db, cli_sync = client
+    db.record_file_state(os.path.join(cli_sync.CLAUDE_PROJECTS_DIR, "a.jsonl"), 1.0, 10)
+    db.record_file_state(os.path.join(cli_sync.CODEX_SESSIONS_DIR, "b.jsonl"), 2.0, 20)
+    rc = admin.main(["force-resync"])
+    assert rc == 0
+    n = db.connect().execute("SELECT COUNT(*) FROM ingest_files").fetchone()[0]
+    assert n == 0
