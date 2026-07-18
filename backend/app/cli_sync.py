@@ -23,7 +23,7 @@ import threading
 from contextlib import contextmanager
 
 from . import db
-from .parsers import PARSER_VERSION, claude_cli, codex_cli
+from .parsers import claude_cli, codex_cli
 
 log = logging.getLogger("cairn.sync")
 
@@ -136,7 +136,8 @@ def _scan() -> dict:
             db.record_file_state(path, st.st_mtime, st.st_size)
             db.record_import_run(
                 source=src, input_name=path, started_at=started,
-                completed_at=db.utcnow_iso(), parser_version=PARSER_VERSION,
+                completed_at=db.utcnow_iso(),
+                parser_version=f"{src}/{parser.PARSER_VERSION}",
                 inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
                 failed=result.failed,
                 conversations=len(result.conversations), warnings=result.warnings,

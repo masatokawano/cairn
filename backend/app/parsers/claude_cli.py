@@ -24,6 +24,10 @@ import json
 from .base import ParseResult, ParsedAttachment, ParsedConversation, ParsedMessage, make_title
 
 SOURCE = "claude_cli"
+# Per-parser version (backlog A3), recorded in import_runs as
+# "<SOURCE>/<PARSER_VERSION>". Bump when this parser's output for the
+# same input could change, then re-ingest this source only.
+PARSER_VERSION = "1"
 
 
 def _block_text(content) -> str:

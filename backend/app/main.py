@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import cli_sync, db
-from .parsers import PARSER_VERSION, FileTooLargeError, UnknownFormatError, parse_upload
+from .parsers import FileTooLargeError, UnknownFormatError, parse_upload
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cairn")
@@ -141,7 +141,10 @@ async def import_file(file: UploadFile, request: Request):
         stats = db.upsert_conversations(result.conversations)
     db.record_import_run(
         source="upload", input_name=name, started_at=started,
-        completed_at=db.utcnow_iso(), parser_version=PARSER_VERSION,
+        completed_at=db.utcnow_iso(),
+        # "<parser>/<version>" (A3): upload runs record source='upload', so
+        # the detected parser's identity travels in parser_version instead.
+        parser_version=f"{result.parser}/{result.parser_version}",
         inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
         failed=result.failed,
         conversations=len(result.conversations), warnings=result.warnings,

@@ -27,6 +27,10 @@ from .base import (
 )
 
 SOURCE = "chatgpt"
+# Per-parser version (backlog A3), recorded in import_runs as
+# "<SOURCE>/<PARSER_VERSION>". Bump when this parser's output for the
+# same input could change, then re-ingest this source only.
+PARSER_VERSION = "1"
 
 # Tells the dispatcher to pass us the ZIP's binary entries plus the asset-
 # name lookup. Without these we'd still parse, just without bytes/filenames.

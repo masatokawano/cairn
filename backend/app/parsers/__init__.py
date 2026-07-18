@@ -8,9 +8,9 @@ import re
 import zipfile
 
 from . import chatgpt, claude_export, gemini
-from .base import PARSER_VERSION, ParseResult
+from .base import ParseResult
 
-__all__ = ["PARSER_VERSION", "ParseResult", "parse_upload",
+__all__ = ["ParseResult", "parse_upload",
            "UnknownFormatError", "FileTooLargeError"]
 
 # Detection order matters: chatgpt's `mapping` and claude's `chat_messages`
@@ -188,6 +188,8 @@ def _parse_chatgpt_shards(zf: zipfile.ZipFile, shards: list[str]) -> ParseResult
         r = chatgpt.parse(data, attachments=attachments_map, asset_names=asset_names)
         merged.conversations.extend(r.conversations)
         merged.warnings.extend(r.warnings)
+    merged.parser = chatgpt.SOURCE
+    merged.parser_version = chatgpt.PARSER_VERSION
     return merged
 
 
@@ -203,7 +205,10 @@ def _parse_json_bytes(filename: str, raw: bytes,
                 # accept extra kwargs, so we gate by parser identity.
                 if parser is chatgpt:
                     extra["asset_names"] = _load_chatgpt_asset_names(zf)
-            return parser.parse(data, **extra)
+            result = parser.parse(data, **extra)
+            result.parser = parser.SOURCE
+            result.parser_version = parser.PARSER_VERSION
+            return result
     raise UnknownFormatError(
         f"{filename}: ChatGPT / Claude / Gemini のいずれの形式とも一致しません"
     )

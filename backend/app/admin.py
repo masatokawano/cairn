@@ -43,7 +43,7 @@ Commands:
 Usage:
   .venv/bin/python -m app.admin redact-scan
   .venv/bin/python -m app.admin redact-apply [--yes]
-  .venv/bin/python -m app.admin force-resync
+  .venv/bin/python -m app.admin force-resync [--source claude_cli|codex_cli]
   .venv/bin/python -m app.admin import-runs [--limit N] [--source S]
   .venv/bin/python -m app.admin integrity-check
   .venv/bin/python -m app.admin backup [--out PATH] [--with-blobs] [--keep N]
@@ -199,12 +199,27 @@ def cmd_apply(args) -> int:
     return 0
 
 
-def cmd_force_resync(_args) -> int:
+def cmd_force_resync(args) -> int:
+    from . import cli_sync
     conn = db.connect()
     with conn:
-        n = conn.execute("DELETE FROM ingest_files").rowcount
-    print(f"cleared {n} ingest_files entries; next sync will re-parse all CLI logs")
-    from . import cli_sync
+        if args.source:
+            # Partial re-ingest (A3): clear only the chosen parser's tree so a
+            # single-parser version bump doesn't force re-parsing everything.
+            root = {
+                "claude_cli": cli_sync.CLAUDE_PROJECTS_DIR,
+                "codex_cli": cli_sync.CODEX_SESSIONS_DIR,
+            }[args.source]
+            prefix = os.path.abspath(root) + os.sep
+            n = conn.execute(
+                "DELETE FROM ingest_files WHERE substr(path, 1, ?) = ?",
+                (len(prefix), prefix),
+            ).rowcount
+            print(f"cleared {n} ingest_files entries under {root}; "
+                  f"next sync will re-parse {args.source} logs")
+        else:
+            n = conn.execute("DELETE FROM ingest_files").rowcount
+            print(f"cleared {n} ingest_files entries; next sync will re-parse all CLI logs")
     stats = cli_sync.scan_once()
     print(json.dumps({k: v for k, v in stats.items() if k != "warnings"}, ensure_ascii=False))
     if stats["warnings"]:
@@ -447,7 +462,11 @@ def main(argv=None) -> int:
     p_apply = sub.add_parser("redact-apply")
     p_apply.add_argument("--yes", action="store_true", help="skip confirmation prompt")
     p_apply.set_defaults(func=cmd_apply)
-    sub.add_parser("force-resync").set_defaults(func=cmd_force_resync)
+    p_resync = sub.add_parser("force-resync")
+    p_resync.add_argument("--source", choices=["claude_cli", "codex_cli"], default=None,
+                          help="clear only this parser's ingest_files tree "
+                               "(partial re-ingest after a parser version bump, A3)")
+    p_resync.set_defaults(func=cmd_force_resync)
     p_runs = sub.add_parser("import-runs")
     p_runs.add_argument("--limit", type=int, default=20)
     p_runs.add_argument("--source", default=None, help="filter: upload | claude_cli | codex_cli")

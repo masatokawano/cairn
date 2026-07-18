@@ -16,6 +16,10 @@ import json
 from .base import ParseResult, ParsedConversation, ParsedMessage, make_title
 
 SOURCE = "codex_cli"
+# Per-parser version (backlog A3), recorded in import_runs as
+# "<SOURCE>/<PARSER_VERSION>". Bump when this parser's output for the
+# same input could change, then re-ingest this source only.
+PARSER_VERSION = "1"
 
 _NOISE_PREFIXES = (
     "<permissions instructions>",

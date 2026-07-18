@@ -88,7 +88,7 @@
 | A0 | ✅ 完了（2026-07-12）: Gemini Takeout +6 会話、Claude export +14/更新177、ChatGPT は 6/26 版取り込み済みを確認（1,226 全 skip）。Obsidian 3 ノートは launchd 同期済み。`index rebuild` 実行。S5 の 4 系統すべてに実データあり | XS | — | 済 |
 | A1 | ✅ 完了（2026-07-17）: `backup --with-blobs` で `<backup>.attachments/` に兄弟複製（DB とペアで移動・復元） | XS | — | 済 |
 | A2 | ✅ 完了（2026-07-17）: failed = パースできなかった入力単位の数（全体例外=1、失敗シャード数）。寛容な per-entry skip は warnings のまま（回帰テストで固定） | XS | — | 済 |
-| A3 | per-parser PARSER_VERSION — 現状 suite 単位 | S | — | 部分再 ingest が可能になる |
+| A3 | ✅ 完了（2026-07-18）: 各会話パーサが `PARSER_VERSION` を宣言、import_runs には `<parser>/<version>` 形式で記録（upload は source='upload' のためパーサ識別を兼ねる）。`force-resync --source claude_cli\|codex_cli` で片側のみの部分再 ingest。x/facebook は import_runs 非記録の一回性 CLI のため対象外 | S | — | 済 |
 | A4 | bearer token 認証 — SECURITY 残課題。**見送り（2026-07-17 オーナー決定）**: ローカル運用では不要のまま。共有利用が要件化したら SECURITY.md 残課題（§残課題）として再提案 | S/M | — | 見送り |
 | A5 | API/UI 経由の export — 現状 admin CLI のみ | S | — | UX 向上 |
 | A6 | ✅ 完了（2026-07-17）: `backend/pytest.ini` の filterwarnings（message 一致）で抑制。httpx2 依存追加は不採用 — 次の意図的な starlette 更新時に再検討 | XS | — | 済 |
