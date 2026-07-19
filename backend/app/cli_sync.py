@@ -37,6 +37,10 @@ SYNC_INTERVAL = float(os.environ.get("CAIRN_SYNC_INTERVAL", "60"))
 
 
 def _iter_jsonl(root: str):
+    # Absolute walk so ingest_files always stores absolute paths — the
+    # partial force-resync (A3) deletes by absolute prefix, and a relative
+    # CAIRN_CLAUDE_DIR/CAIRN_CODEX_DIR must not silently miss those rows.
+    root = os.path.abspath(root)
     if not os.path.isdir(root):
         return
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -117,6 +121,11 @@ def _scan() -> dict:
                 st = os.stat(path)
             except OSError:
                 continue
+            # Skip is (mtime, size) only — PARSER_VERSION deliberately does
+            # NOT auto-invalidate this cache: wiring it in would need an
+            # ingest_files column (= schema migration) for a rare event.
+            # After a version bump run `admin force-resync --source <parser>`
+            # to re-parse that tree (A3).
             if db.file_state(path) == (st.st_mtime, st.st_size):
                 continue
             started = db.utcnow_iso()
@@ -132,12 +141,14 @@ def _scan() -> dict:
                     failed=1,
                 )
                 continue
+            result.parser = src
+            result.parser_version = parser.PARSER_VERSION
             stats = db.upsert_conversations(result.conversations)
             db.record_file_state(path, st.st_mtime, st.st_size)
             db.record_import_run(
                 source=src, input_name=path, started_at=started,
                 completed_at=db.utcnow_iso(),
-                parser_version=f"{src}/{parser.PARSER_VERSION}",
+                parser_version=f"{result.parser}/{result.parser_version}",
                 inserted=stats["inserted"], updated=stats["updated"], skipped=stats["skipped"],
                 failed=result.failed,
                 conversations=len(result.conversations), warnings=result.warnings,

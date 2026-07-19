@@ -265,3 +265,73 @@ def test_force_resync_without_source_clears_all(client, capsys):
     assert rc == 0
     n = db.connect().execute("SELECT COUNT(*) FROM ingest_files").fetchone()[0]
     assert n == 0
+
+
+def test_force_resync_source_codex_symmetric(client, capsys):
+    """--source codex_cli clears the codex tree and preserves claude state."""
+    from app import admin
+    importlib.reload(admin)
+    _, db, cli_sync = client
+    claude_file = os.path.join(cli_sync.CLAUDE_PROJECTS_DIR, "p", "a.jsonl")
+    codex_file = os.path.join(cli_sync.CODEX_SESSIONS_DIR, "q", "b.jsonl")
+    db.record_file_state(claude_file, 1.0, 10)
+    db.record_file_state(codex_file, 2.0, 20)
+
+    rc = admin.main(["force-resync", "--source", "codex_cli"])
+    assert rc == 0
+    remaining = [r["path"] for r in db.connect().execute(
+        "SELECT path FROM ingest_files").fetchall()]
+    assert codex_file not in remaining
+    assert claude_file in remaining
+
+
+def test_force_resync_source_spares_sibling_prefix_dir(client, capsys):
+    """A sibling directory sharing the root as a name prefix (…/claudeX) must
+    survive --source claude_cli: the prefix match includes the separator."""
+    from app import admin
+    importlib.reload(admin)
+    _, db, cli_sync = client
+    sibling_file = os.path.abspath(cli_sync.CLAUDE_PROJECTS_DIR) + "X/a.jsonl"
+    db.record_file_state(sibling_file, 1.0, 10)
+
+    rc = admin.main(["force-resync", "--source", "claude_cli"])
+    assert rc == 0
+    remaining = [r["path"] for r in db.connect().execute(
+        "SELECT path FROM ingest_files").fetchall()]
+    assert sibling_file in remaining
+
+
+def test_force_resync_source_with_relative_root(tmp_path, monkeypatch, capsys):
+    """Codex review (PR #28): a relative CAIRN_CLAUDE_DIR must still work —
+    the scanner stores absolute paths, so the absolute-prefix DELETE matches."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CAIRN_DB", str(tmp_path / "test.db"))
+    monkeypatch.setenv("CAIRN_CLAUDE_DIR", "claude-rel")
+    monkeypatch.setenv("CAIRN_CODEX_DIR", "codex-rel")
+    from app import admin, cli_sync, db
+    importlib.reload(db)
+    importlib.reload(cli_sync)
+    importlib.reload(admin)
+    try:
+        log_dir = tmp_path / "claude-rel" / "-Users-test-proj"
+        log_dir.mkdir(parents=True)
+        (log_dir / "sess-1.jsonl").write_text(json.dumps(
+            {"type": "user", "isSidechain": False, "uuid": "u1",
+             "sessionId": "sess-1", "timestamp": "2025-12-11T09:01:00Z",
+             "cwd": "/Users/test/proj",
+             "message": {"role": "user", "content": "テスト質問"}}))
+        cli_sync.scan_once()
+        paths = [r["path"] for r in db.connect().execute(
+            "SELECT path FROM ingest_files").fetchall()]
+        assert len(paths) == 1 and os.path.isabs(paths[0])
+
+        rc = admin.main(["force-resync", "--source", "claude_cli"])
+        assert rc == 0
+        # the file was re-scanned right after the clear; the row must belong
+        # to the fresh scan (same absolute path), proving the DELETE matched
+        assert "cleared 1 ingest_files entries" in capsys.readouterr().out
+    finally:
+        conn = getattr(db._local, "conn", None)
+        if conn:
+            conn.close()
+            db._local.conn = None
