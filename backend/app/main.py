@@ -231,6 +231,38 @@ def conversation(conv_id: int):
     return conv
 
 
+# backlog A5: same filters/generators as `admin export-jsonl|export-markdown`
+# (db.iter_export_jsonl / iter_export_markdown), exposed over HTTP so export
+# doesn't require CLI access. Same exposure class as GET /api/conversations
+# (full plaintext bodies) — covered by the existing local_only middleware,
+# no new auth surface. Filename is entirely server-generated (never echoes
+# user input) so Content-Disposition can't be used for header injection.
+_EXPORT_GENERATORS = {
+    "jsonl": (db.iter_export_jsonl, "application/x-ndjson", "jsonl"),
+    "markdown": (db.iter_export_markdown, "text/markdown; charset=utf-8", "md"),
+}
+
+
+@app.get("/api/export")
+def export(
+    format: str = Query(..., pattern="^(jsonl|markdown)$"),
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    conversation_id: int | None = None,
+):
+    from fastapi.responses import StreamingResponse
+
+    gen_fn, media_type, ext = _EXPORT_GENERATORS[format]
+    stamp = db.utcnow_iso().replace(":", "").replace("-", "").split(".")[0]
+    filename = f"cairn-export-{stamp}.{ext}"
+    return StreamingResponse(
+        gen_fn(source, after, before, conversation_id),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/items")
 def items(
     source: str | None = None,

@@ -132,6 +132,19 @@ ZIPのまま、または中のJSONファイルを、Cairnの画面にドラッ�
 - ソースのチップ（ChatGPT / Claude / …）で絞り込み
 - ヒットした会話をクリックするとフルスレッドを表示
 
+## エクスポート
+
+会話を JSONL（`schema: "cairn.export.v1"`）または Markdown で書き出す。
+検索と同じ絞り込み（source / 期間）が使える。
+
+- 画面右上の「エクスポート (JSONL)」「エクスポート (Markdown)」ボタン
+  （現在の source/期間フィルタを引き継いでダウンロード）
+- API: `GET /api/export?format=jsonl|markdown&source=&after=&before=&conversation_id=`
+- 管理CLI: `python -m app.admin export-jsonl|export-markdown [--out PATH] [--source S] [--after ISO] [--before ISO] [--conversation-id N]`
+
+いずれも `local_only` ミドルウェア配下（`GET /api/conversations` と同じ露出クラス、
+新規認証面はなし）。
+
 ## MCPサーバー（エージェントからアーカイブを参照する）
 
 Cairn は読み取り専用の横断MCPサーバー（STDIO）を同梱しています。claude CLI / codex /

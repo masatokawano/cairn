@@ -428,6 +428,17 @@ export default function App() {
 
   const totalConvs = stats.reduce((a, s) => a + s.conversations, 0)
 
+  // backlog A5: export the current source/date filters (same ones driving
+  // search) via GET /api/export. A plain navigation, not fetch — the
+  // server's Content-Disposition drives the browser's native download.
+  const exportUrl = (format: 'jsonl' | 'markdown') => {
+    const params = new URLSearchParams({ format })
+    if (source) params.set('source', source)
+    if (after) params.set('after', after)
+    if (before) params.set('before', before)
+    return `/api/export?${params.toString()}`
+  }
+
   return (
     <div
       className={`app ${dragOver ? 'drag-over' : ''}`}
@@ -454,6 +465,12 @@ export default function App() {
           </button>
           <button onClick={openImportRuns} disabled={busy}>
             取り込み履歴
+          </button>
+          <button onClick={() => window.location.assign(exportUrl('jsonl'))} disabled={busy}>
+            エクスポート (JSONL)
+          </button>
+          <button onClick={() => window.location.assign(exportUrl('markdown'))} disabled={busy}>
+            エクスポート (Markdown)
           </button>
           <input
             ref={fileInput}

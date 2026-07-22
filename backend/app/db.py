@@ -2900,23 +2900,24 @@ def iter_export_conversations(
             yield conv
 
 
-def export_jsonl(
-    out,
+def iter_export_jsonl(
     source: str | None = None,
     after: str | None = None,
     before: str | None = None,
     conversation_id: int | None = None,
-) -> int:
-    """Write filtered conversations to `out` as JSONL (one object per line).
-    Returns the number of conversations written. Streams one conversation at
-    a time so large archives do not need to fit in memory.
+):
+    """Yield one JSONL line (incl. trailing newline) per matching conversation.
+
+    Shared by export_jsonl (CLI, writes to a file/stdout) and the streaming
+    /api/export endpoint (backlog A5) — one record-shaping implementation so
+    the two paths cannot drift. Streams one conversation at a time so large
+    archives do not need to fit in memory.
 
     Output shape: `{schema, kind, source, source_id, title, created_at,
     updated_at, meta, messages, derived}`. `derived` is reserved for future
     Cairn-computed fields (embeddings, segments, ...) so readers can tell
     original-from-source data apart from extensions.
     """
-    n = 0
     for conv in iter_export_conversations(source, after, before, conversation_id):
         record = {
             "schema": "cairn.export.v1",
@@ -2939,9 +2940,57 @@ def export_jsonl(
             ],
             "derived": {},
         }
-        out.write(json.dumps(record, ensure_ascii=False) + "\n")
+        yield json.dumps(record, ensure_ascii=False) + "\n"
+
+
+def export_jsonl(
+    out,
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    conversation_id: int | None = None,
+) -> int:
+    """Write filtered conversations to `out` as JSONL. Returns the count."""
+    n = 0
+    for line in iter_export_jsonl(source, after, before, conversation_id):
+        out.write(line)
         n += 1
     return n
+
+
+def iter_export_markdown(
+    source: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    conversation_id: int | None = None,
+):
+    """Yield one Markdown chunk per matching conversation (backlog A5, shared
+    with export_markdown). Shares the filter layer with iter_export_jsonl
+    (iter_export_conversations), so flags behave identically.
+
+    Per-conversation layout: `# title` + a bullet list of source / source_id /
+    created_at / updated_at, then each message as `## role — timestamp` with
+    the body preserved verbatim. Multiple conversations are separated by a
+    horizontal rule so the stream can be split (e.g. for Obsidian).
+    """
+    for i, conv in enumerate(iter_export_conversations(source, after, before, conversation_id)):
+        chunk = "\n---\n\n" if i > 0 else ""
+        chunk += f"# {conv['title']}\n\n"
+        chunk += f"- source: {conv['source']}\n"
+        chunk += f"- source_id: {conv['source_id']}\n"
+        if conv["created_at"]:
+            chunk += f"- created_at: {conv['created_at']}\n"
+        if conv["updated_at"]:
+            chunk += f"- updated_at: {conv['updated_at']}\n"
+        chunk += "\n"
+        for m in conv["messages"]:
+            header = f"## {m['role']}"
+            if m["created_at"]:
+                header += f" — {m['created_at']}"
+            chunk += f"{header}\n\n"
+            chunk += m["text"].rstrip()
+            chunk += "\n\n"
+        yield chunk
 
 
 def export_markdown(
@@ -2952,33 +3001,10 @@ def export_markdown(
     conversation_id: int | None = None,
 ) -> int:
     """Write filtered conversations to `out` as human-readable Markdown.
-    Returns the number of conversations written. Shares the filter layer with
-    export_jsonl (iter_export_conversations), so flags behave identically.
-
-    Per-conversation layout: `# title` + a bullet list of source / source_id /
-    created_at / updated_at, then each message as `## role — timestamp` with
-    the body preserved verbatim. Multiple conversations are separated by a
-    horizontal rule so the stream can be split (e.g. for Obsidian).
-    """
+    Returns the number of conversations written."""
     n = 0
-    for conv in iter_export_conversations(source, after, before, conversation_id):
-        if n > 0:
-            out.write("\n---\n\n")
-        out.write(f"# {conv['title']}\n\n")
-        out.write(f"- source: {conv['source']}\n")
-        out.write(f"- source_id: {conv['source_id']}\n")
-        if conv["created_at"]:
-            out.write(f"- created_at: {conv['created_at']}\n")
-        if conv["updated_at"]:
-            out.write(f"- updated_at: {conv['updated_at']}\n")
-        out.write("\n")
-        for m in conv["messages"]:
-            header = f"## {m['role']}"
-            if m["created_at"]:
-                header += f" — {m['created_at']}"
-            out.write(f"{header}\n\n")
-            out.write(m["text"].rstrip())
-            out.write("\n\n")
+    for chunk in iter_export_markdown(source, after, before, conversation_id):
+        out.write(chunk)
         n += 1
     return n
 

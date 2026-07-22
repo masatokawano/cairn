@@ -90,7 +90,7 @@
 | A2 | ✅ 完了（2026-07-17）: failed = パースできなかった入力単位の数（全体例外=1、失敗シャード数）。寛容な per-entry skip は warnings のまま（回帰テストで固定） | XS | — | 済 |
 | A3 | ✅ 完了（2026-07-18）: 各会話パーサが `PARSER_VERSION` を宣言、import_runs には `<parser>/<version>` 形式で記録（upload は source='upload' のためパーサ識別を兼ねる）。`force-resync --source claude_cli\|codex_cli` で片側のみの部分再 ingest。x/facebook は import_runs 非記録の一回性 CLI のため対象外 | S | — | 済 |
 | A4 | bearer token 認証 — SECURITY 残課題。**見送り（2026-07-17 オーナー決定）**: ローカル運用では不要のまま。共有利用が要件化したら SECURITY.md 残課題（§残課題）として再提案 | S/M | — | 見送り |
-| A5 | API/UI 経由の export — 現状 admin CLI のみ | S | — | UX 向上 |
+| A5 | ✅ 完了（2026-07-22）: `GET /api/export?format=jsonl\|markdown&source=&after=&before=&conversation_id=`（既存 db.iter_export_jsonl/markdown を CLI と共有）+ 画面右上のエクスポートボタン（現在のフィルタを継承）。認証面の新規追加なし（既存 local_only 配下） | S | — | 済 |
 | A6 | ✅ 完了（2026-07-17）: `backend/pytest.ini` の filterwarnings（message 一致）で抑制。httpx2 依存追加は不採用 — 次の意図的な starlette 更新時に再検討 | XS | — | 済 |
 | A7 | 一部完了（2026-07-18）: premigrate 5本 + 旧バックアップ6本を削除（`prune_backups(keep=1)` 使用、約3.7GB解放）。**温存（オーナー決定）**: `temp/`（547MB、取り込み元 zip）・旧 Vault 複製・旧 brain-sync 実体 | XS | **残りも不可逆＝個別承認** | disk と平文残存の解消（status doc R7 の表） |
 | A8 | ✅ 完了（2026-07-18）: `backup --keep N` — 自動命名バックアップの最新 N 個を残して削除（`.attachments` 兄弟ごと）。`--out` 指定のバックアップは対象外 | XS | — | 済 |
